@@ -1,0 +1,95 @@
+# ===============================
+# MAPPINGS CONFIGURATION
+# ===============================
+#
+# This file defines how contract events are mapped into Postgres tables.
+# Each entry in `events:` corresponds to one event type (e.g., "mint", "transfer").
+#
+# Required fields:
+#   - contract:   Contract address (string).
+#   - log_type:   Event type string to match (e.g. "mint", "transfer").
+#   - table:      Postgres table name (≤ 63 chars).  
+#                 Best practice: prefix with contract slug to avoid collisions.
+#   - schema:     Column definitions for this table (string, numeric, bool).
+#   - parse:      Parsing mode for logs:
+#
+#     1) "json"
+#        - Expects the log string to be a JSON object.
+#        - Field "type" is mandatory and defines the log_type.
+#        - Fields are extracted using JSON keys.
+#        - Field mapping example:
+#            schema:
+#              id: numeric
+#              by: string
+#            fields:
+#              id: "$.attributes.id"
+#              by: "$.attributes.by"
+#
+#     2) "csv"
+#        - Expects the log string to be a delimited string (default: whitespace).
+#        - Tokens are accessed by numeric position (0-based index).
+#        - The first token must be the event_type.
+#        - Optional: `delimiter` sets how tokens are split (default: " ").
+#        - Optional: `key_delimiter` extracts only the value part of key/value pairs.
+#            - If unset → the entire token is used ("id=123" → "id=123").
+#            - If set to "=" → only the value part is stored ("id=123" → "123").
+#            - If set to ":" → "key:value" → "value".
+#
+# Example (CSV without key_delimiter):
+#   schema:
+#     id: string
+#     user: string
+#   parse: "csv"
+#   delimiter: ","   # split by comma
+#   fields:
+#     id: "1"        # first token (full string) after the event type (index 0)
+#     user: "2"      # second token
+#
+# Example (CSV with key_delimiter):
+#   schema:
+#     id: numeric
+#     action: string
+#   parse: "csv"
+#   delimiter: " "         # split by whitespace
+#   key_delimiter: "="     # parse key=value format
+#   fields:
+#     id: "1"              # "id=42" → "42"
+#     action: "2"          # "action=transfer" → "transfer"
+#
+# ===============================
+
+events:
+  # Escrow Created event
+  - contract: "vsc1BgfucQVHwYBHuK2yMEv4AhYua9rtQ45Uoe"
+    log_type: "cr"
+    table: "escrow_created_events"
+    schema:
+      id: numeric
+      from: string
+      to: string
+      arbitrator: string
+      amount: numeric
+      asset: string
+    parse: "json"
+    fields:
+      id: "$.attributes.id"
+      from: "$.attributes.f"
+      to: "$.attributes.t"
+      arbitrator: "$.attributes.arb"
+      amount: "$.attributes.am"
+      asset: "$.attributes.as"
+
+  # csv test event
+  - contract: "vscContractId" # contract address
+    log_type: "mint_csv" # type of the log event
+    table: "contractslug_mint_csv_events" # target table name
+    schema: # columns in the target table (numeric, string and bool)
+        id: numeric 
+        by: string
+    parse: "csv" # parse mode of the log
+    delimiter: "|"         # split by pipe
+    key_delimiter: "="     # parse key=value format
+    fields: # remember: first token (index 0) is reserved for the log type
+        id: "1"            # "id=42" → "42"
+        by: "2"            # "by=bob" → "bob"
+

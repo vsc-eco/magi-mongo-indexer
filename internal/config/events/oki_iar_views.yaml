@@ -1,0 +1,990 @@
+# ================================
+# Database Views
+# ================================
+# Each entry defines a Postgres view to be created or updated.
+# Fields:
+#   - name: SQL view name (≤ 63 chars).
+#   - sql:  Full CREATE OR REPLACE VIEW statement.
+#
+# Best practice:
+#   - Prefix view names with contract slug to avoid collisions.
+#   - Reference the event tables created in mappings.yaml.
+
+# ================================
+# Database Views for Escrow Indexer
+# ================================
+
+views:
+  # Combine all game-related logs into a single unified event stream
+  - name: okinoko_iarv2_all_events
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_all_events AS
+      SELECT 
+        'created' AS event_type,
+        id,
+        by,
+        NULL::text AS fmp,
+        NULL::int AS cell,
+        NULL::text AS winner,
+        NULL::text AS resigner,
+        NULL::text AS timedout,
+        NULL::text AS operation,
+        NULL::text AS choice,
+        NULL::int AS color,
+        NULL::text AS name,
+        indexer_block_height
+      FROM okinoko_iarv2_created_events
+
+      UNION ALL
+
+      SELECT
+        'joined' AS event_type,
+        id,
+        by,
+        fmp,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_joined_events
+
+      UNION ALL
+
+      SELECT
+        'move' AS event_type,
+        id,
+        by,
+        NULL,
+        cell,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_move_events
+
+      UNION ALL
+
+      SELECT
+        'won' AS event_type,
+        id,
+        NULL,
+        NULL,
+        NULL,
+        winner,
+        NULL, NULL, NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_won_events
+
+      UNION ALL
+
+      SELECT
+        'resign' AS event_type,
+        id,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        resigner,
+        NULL, NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_resign_events
+
+      UNION ALL
+
+      SELECT
+        'timeout' AS event_type,
+        id,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        timedout,
+        NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_timeout_events
+
+      UNION ALL
+
+      SELECT
+        'draw' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_draw_events
+
+      UNION ALL
+
+      SELECT
+        'swap' AS event_type,
+        id,
+        by,
+        NULL,
+        cell,
+        NULL,
+        NULL,
+        NULL,
+        operation,
+        choice,
+        color,
+        NULL,
+        indexer_block_height
+      FROM okinoko_iarv2_swap_events;
+
+
+  # Shows the latest state for each game (winner, last move, etc.)
+  - name: okinoko_iarv2_latest_state
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_latest_state AS
+      WITH latest_moves AS (
+        SELECT 
+          id,
+          by AS last_move_by,
+          cell AS last_move_cell,
+          indexer_block_height,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_move_events
+      ),
+      latest_swaps AS (
+        SELECT
+          id,
+          by AS last_swap_by,
+          operation,
+          cell AS swap_cell,
+          color,
+          choice,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_swap_events
+      ),
+      latest_wins AS (
+        SELECT
+          id,
+          winner,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_won_events
+      ),
+      latest_resigns AS (
+        SELECT
+          id,
+          resigner,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_resign_events
+      ),
+      latest_timeouts AS (
+        SELECT
+          id,
+          timedout,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_timeout_events
+      ),
+      latest_joined AS (
+        SELECT
+          id,
+          by,
+          fmp,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_joined_events
+      ),
+      latest_event_ts AS (
+        SELECT
+          id,
+          MAX(indexer_ts) AS last_event_ts
+        FROM (
+          SELECT id, indexer_ts FROM okinoko_iarv2_created_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_joined_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_move_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_swap_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_won_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_resign_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_timeout_events
+          UNION ALL
+          SELECT id, indexer_ts FROM okinoko_iarv2_draw_events
+        ) AS all_events
+        GROUP BY id
+      )
+      SELECT 
+        c.id,
+        c.by AS creator,
+        c.betamount,
+        c.betasset,
+        c.type,
+        c.name,
+        j.by AS joined_by,
+        w.winner,
+        r.resigner,
+        t.timedout,
+        m.last_move_by,
+        m.last_move_cell,
+        s.last_swap_by,
+        s.operation AS last_swap_operation,
+        s.color AS last_swap_color,
+        s.choice AS last_swap_choice,
+        e.last_event_ts AS indexer_ts
+      FROM okinoko_iarv2_created_events c
+      LEFT JOIN latest_joined j ON c.id = j.id AND j.rn = 1
+      LEFT JOIN latest_wins w ON c.id = w.id AND w.rn = 1
+      LEFT JOIN latest_resigns r ON c.id = r.id AND r.rn = 1
+      LEFT JOIN latest_timeouts t ON c.id = t.id AND t.rn = 1
+      LEFT JOIN latest_moves m ON c.id = m.id AND m.rn = 1
+      LEFT JOIN latest_swaps s ON c.id = s.id AND s.rn = 1
+      LEFT JOIN latest_event_ts e ON c.id = e.id;
+
+
+  # All completed (finished) games — won, resigned, timed out, or draw
+  - name: okinoko_iarv2_completed_games
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_completed_games AS
+      SELECT *
+      FROM okinoko_iarv2_latest_state
+      WHERE winner IS NOT NULL 
+         OR resigner IS NOT NULL
+         OR timedout IS NOT NULL
+         OR id IN (SELECT id FROM okinoko_iarv2_draw_events);
+
+
+  # Active games (created or joined, but not yet ended)
+  - name: okinoko_iarv2_active_games
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_active_games AS
+      SELECT *
+      FROM okinoko_iarv2_latest_state
+      WHERE winner IS NULL 
+        AND resigner IS NULL 
+        AND timedout IS NULL
+        AND id NOT IN (SELECT id FROM okinoko_iarv2_draw_events);
+
+
+  # Simple player activity feed (for explorers / dashboards)
+  - name: okinoko_iarv2_player_activity
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_player_activity AS
+      SELECT 
+        by AS player,
+        'created' AS action,
+        id,
+        indexer_block_height
+      FROM okinoko_iarv2_created_events
+
+      UNION ALL
+      SELECT 
+        by AS player,
+        'joined' AS action,
+        id,
+        indexer_block_height
+      FROM okinoko_iarv2_joined_events
+
+      UNION ALL
+      SELECT 
+        by AS player,
+        'move' AS action,
+        id,
+        indexer_block_height
+      FROM okinoko_iarv2_move_events
+
+      UNION ALL
+      SELECT 
+        by AS player,
+        'swap' AS action,
+        id,
+        indexer_block_height
+      FROM okinoko_iarv2_swap_events;
+
+  # Player statistics summary (wins, losses, draws, total games)
+  - name: okinoko_iarv2_player_stats
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_player_stats AS
+      WITH
+      -- Identify winners, resignees, and timeouts as individual outcomes
+      outcomes AS (
+        SELECT id, winner AS player, 'win' AS result FROM okinoko_iarv2_won_events
+        UNION ALL
+        SELECT id, resigner AS player, 'resign' AS result FROM okinoko_iarv2_resign_events
+        UNION ALL
+        SELECT id, timedout AS player, 'timeout' AS result FROM okinoko_iarv2_timeout_events
+        UNION ALL
+        SELECT id, by AS player, 'draw' AS result
+        FROM okinoko_iarv2_created_events
+        WHERE id IN (SELECT id FROM okinoko_iarv2_draw_events)
+      ),
+      -- Flatten active participants (creator + joiner)
+      participants AS (
+        SELECT id, by AS player FROM okinoko_iarv2_created_events
+        UNION
+        SELECT id, by AS player FROM okinoko_iarv2_joined_events
+      ),
+      -- Combine participants with outcomes
+      player_games AS (
+        SELECT 
+          p.player,
+          p.id,
+          COALESCE(o.result, 'active') AS result
+        FROM participants p
+        LEFT JOIN outcomes o ON p.id = o.id AND p.player = o.player
+      )
+      SELECT
+        player,
+        COUNT(*) AS total_games,
+        COUNT(*) FILTER (WHERE result = 'win') AS wins,
+        COUNT(*) FILTER (WHERE result = 'resign') AS resigns,
+        COUNT(*) FILTER (WHERE result = 'timeout') AS timeouts,
+        COUNT(*) FILTER (WHERE result = 'draw') AS draws,
+        COUNT(*) FILTER (WHERE result = 'active') AS active_games
+      FROM player_games
+      GROUP BY player
+      ORDER BY wins DESC, total_games DESC;
+
+  # Player statistics grouped by game type (for leaderboards)
+  - name: okinoko_iarv2_player_stats_by_type
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_player_stats_by_type AS
+      WITH participants_raw AS (
+        SELECT
+          c.id,
+          c.type,
+          c.by AS player
+        FROM okinoko_iarv2_created_events c
+
+        UNION ALL
+
+        SELECT
+          j.id,
+          c.type,
+          j.by AS player
+        FROM okinoko_iarv2_joined_events j
+        JOIN okinoko_iarv2_created_events c ON c.id = j.id
+      ),
+      participants AS (
+        SELECT DISTINCT id, type, player FROM participants_raw
+      ),
+      results_raw AS (
+        -- Board victories
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          w.indexer_ts
+        FROM okinoko_iarv2_won_events w
+        JOIN participants p ON p.id = w.id AND p.player = w.winner
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          w.indexer_ts
+        FROM okinoko_iarv2_won_events w
+        JOIN participants p ON p.id = w.id AND p.player <> w.winner
+
+        UNION ALL
+
+        -- Resignations
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          r.indexer_ts
+        FROM okinoko_iarv2_resign_events r
+        JOIN participants p ON p.id = r.id AND p.player = r.resigner
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          r.indexer_ts
+        FROM okinoko_iarv2_resign_events r
+        JOIN participants p ON p.id = r.id AND p.player <> r.resigner
+
+        UNION ALL
+
+        -- Timeouts
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          t.indexer_ts
+        FROM okinoko_iarv2_timeout_events t
+        JOIN participants p ON p.id = t.id AND p.player = t.timedout
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          t.indexer_ts
+        FROM okinoko_iarv2_timeout_events t
+        JOIN participants p ON p.id = t.id AND p.player <> t.timedout
+
+        UNION ALL
+
+        -- Draws (both players)
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'draw' AS result,
+          d.indexer_ts
+        FROM okinoko_iarv2_draw_events d
+        JOIN participants p ON p.id = d.id
+      ),
+      results AS (
+        SELECT DISTINCT ON (id, player)
+          id,
+          type,
+          player,
+          result,
+          indexer_ts
+        FROM results_raw
+        ORDER BY id, player, indexer_ts DESC
+      )
+      SELECT
+        p.player,
+        p.type,
+        COUNT(*) AS games_played,
+        COUNT(*) FILTER (WHERE r.result = 'win') AS wins,
+        COUNT(*) FILTER (WHERE r.result = 'draw') AS draws,
+        COUNT(*) FILTER (WHERE r.result = 'loss') AS losses,
+        COUNT(*) FILTER (WHERE r.result IS NULL) AS active_games,
+        ROUND(COUNT(*) FILTER (WHERE r.result = 'win')::numeric / NULLIF(COUNT(*), 0), 4) AS win_ratio,
+        MAX(r.indexer_ts) AS last_result_ts
+      FROM participants p
+      LEFT JOIN results r ON p.id = r.id AND p.player = r.player
+      GROUP BY p.player, p.type
+      HAVING COUNT(*) FILTER (WHERE r.result IN ('win', 'loss', 'draw')) > 0;
+
+  - name: okinoko_iarv2_player_stats_by_type_current_season
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_player_stats_by_type_current_season AS
+      WITH quarter_start AS (
+        SELECT date_trunc('quarter', now()) AS ts
+      ),
+      recent_games AS (
+        SELECT DISTINCT id
+        FROM (
+          SELECT id FROM okinoko_iarv2_won_events WHERE indexer_ts >= (SELECT ts FROM quarter_start)
+          UNION ALL
+          SELECT id FROM okinoko_iarv2_resign_events WHERE indexer_ts >= (SELECT ts FROM quarter_start)
+          UNION ALL
+          SELECT id FROM okinoko_iarv2_timeout_events WHERE indexer_ts >= (SELECT ts FROM quarter_start)
+          UNION ALL
+          SELECT id FROM okinoko_iarv2_draw_events WHERE indexer_ts >= (SELECT ts FROM quarter_start)
+        ) g
+      ),
+      participants_raw AS (
+        SELECT c.id, c.type, c.by AS player
+        FROM okinoko_iarv2_created_events c
+        WHERE c.id IN (SELECT id FROM recent_games)
+
+        UNION ALL
+
+        SELECT j.id, c.type, j.by AS player
+        FROM okinoko_iarv2_joined_events j
+        JOIN okinoko_iarv2_created_events c ON c.id = j.id
+        WHERE j.id IN (SELECT id FROM recent_games)
+      ),
+      participants AS (
+        SELECT DISTINCT id, type, player FROM participants_raw
+      ),
+      results_raw AS (
+        -- Board victories
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          w.indexer_ts
+        FROM okinoko_iarv2_won_events w
+        JOIN participants p ON p.id = w.id AND p.player = w.winner
+        WHERE w.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          w.indexer_ts
+        FROM okinoko_iarv2_won_events w
+        JOIN participants p ON p.id = w.id AND p.player <> w.winner
+        WHERE w.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        -- Resignations
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          r.indexer_ts
+        FROM okinoko_iarv2_resign_events r
+        JOIN participants p ON p.id = r.id AND p.player = r.resigner
+        WHERE r.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          r.indexer_ts
+        FROM okinoko_iarv2_resign_events r
+        JOIN participants p ON p.id = r.id AND p.player <> r.resigner
+        WHERE r.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        -- Timeouts
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'loss' AS result,
+          t.indexer_ts
+        FROM okinoko_iarv2_timeout_events t
+        JOIN participants p ON p.id = t.id AND p.player = t.timedout
+        WHERE t.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'win' AS result,
+          t.indexer_ts
+        FROM okinoko_iarv2_timeout_events t
+        JOIN participants p ON p.id = t.id AND p.player <> t.timedout
+        WHERE t.indexer_ts >= (SELECT ts FROM quarter_start)
+
+        UNION ALL
+
+        -- Draws
+        SELECT
+          p.id,
+          p.type,
+          p.player,
+          'draw' AS result,
+          d.indexer_ts
+        FROM okinoko_iarv2_draw_events d
+        JOIN participants p ON p.id = d.id
+        WHERE d.indexer_ts >= (SELECT ts FROM quarter_start)
+      ),
+      results AS (
+        SELECT DISTINCT ON (id, player)
+          id,
+          type,
+          player,
+          result,
+          indexer_ts
+        FROM results_raw
+        ORDER BY id, player, indexer_ts DESC
+      )
+      SELECT
+        p.player,
+        p.type,
+        COUNT(*) AS games_played,
+        COUNT(*) FILTER (WHERE r.result = 'win') AS wins,
+        COUNT(*) FILTER (WHERE r.result = 'draw') AS draws,
+        COUNT(*) FILTER (WHERE r.result = 'loss') AS losses,
+        0 AS active_games,
+        ROUND(COUNT(*) FILTER (WHERE r.result = 'win')::numeric / NULLIF(COUNT(*), 0), 4) AS win_ratio,
+        MAX(r.indexer_ts) AS last_result_ts
+      FROM participants p
+      JOIN results r ON p.id = r.id AND p.player = r.player
+      GROUP BY p.player, p.type
+      HAVING COUNT(*) FILTER (WHERE r.result IN ('win', 'loss', 'draw')) > 0;
+
+  # Full reconstructed board state for all Inarow (IARv2) game types, including Gomoku swap handling
+  - name: okinoko_iarv2_board_state
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_board_state AS
+      WITH latest_joined AS (
+        SELECT
+          id,
+          by,
+          fmp,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_joined_events
+      ),
+      roles AS (
+        -- Determine creator/joiner and initial X/O assignment (FMC aware)
+        SELECT
+          c.id,
+          c.by AS creator,
+          j.by AS joiner,
+          c.type,
+          CASE
+            WHEN (CASE WHEN j.fmp ~ '^[0-9]+([.][0-9]+)?$' THEN NULLIF(j.fmp, '')::numeric ELSE 0 END) > 0 THEN j.by      -- FMC: joiner starts as X
+            ELSE c.by
+          END AS x_player,
+          CASE
+            WHEN (CASE WHEN j.fmp ~ '^[0-9]+([.][0-9]+)?$' THEN NULLIF(j.fmp, '')::numeric ELSE 0 END) > 0 THEN c.by      -- FMC: creator becomes O
+            ELSE j.by
+          END AS o_player
+        FROM okinoko_iarv2_created_events c
+        LEFT JOIN latest_joined j ON c.id = j.id AND j.rn = 1
+      ),
+      swaps AS (
+        -- Record swap events (Gomoku/Squava style)
+        SELECT
+          id,
+          by,
+          operation,
+          choice,
+          indexer_block_height,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height) AS swap_num
+        FROM okinoko_iarv2_swap_events
+      ),
+      effective_roles AS (
+        -- Compute effective roles considering swap choices
+        SELECT
+          r.id,
+          r.creator,
+          r.joiner,
+          r.type,
+          CASE
+            WHEN r.type IN (3,6) AND EXISTS (
+              SELECT 1 FROM swaps s
+              WHERE s.id = r.id
+              AND (
+                (s.choice = 'swap' AND s.by = r.joiner) OR
+                (s.choice = 'swap' AND s.by = r.creator)
+              )
+            )
+            THEN r.joiner        -- swap phase → joiner becomes X
+            ELSE r.x_player
+          END AS x_player,
+          CASE
+            WHEN r.type IN (3,6) AND EXISTS (
+              SELECT 1 FROM swaps s
+              WHERE s.id = r.id
+              AND (
+                (s.choice = 'swap' AND s.by = r.joiner) OR
+                (s.choice = 'swap' AND s.by = r.creator)
+              )
+            )
+            THEN r.creator        -- swap phase → creator becomes O
+            ELSE r.o_player
+          END AS o_player
+        FROM roles r
+      ),
+      moves AS (
+        -- Capture all moves with ordering
+        SELECT 
+          id,
+          by,
+          cell,
+          indexer_block_height,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height) AS move_number
+        FROM okinoko_iarv2_move_events
+      ),
+      marked AS (
+        -- Assign numeric marks per cell: X=1, O=2
+        SELECT
+          m.id,
+          m.cell,
+          CASE 
+            WHEN m.by = e.x_player THEN '1'
+            WHEN m.by = e.o_player THEN '2'
+            ELSE '0'
+          END AS mark
+        FROM moves m
+        JOIN effective_roles e ON m.id = e.id
+      ),
+      dimensions AS (
+        -- Map game types to board dimensions
+        SELECT * FROM (VALUES
+          (1, 3, 3),    -- TicTacToe
+          (2, 7, 6),    -- ConnectFour
+          (3, 15, 15),  -- Gomoku
+          (4, 5, 5),    -- TicTacToe5
+          (5, 5, 5),    -- Squava
+          (6, 15, 15)   -- GomokuFreestyle
+        ) AS t(type, width, height)
+      ),
+      board_cells AS (
+        -- Construct full numeric board strings
+        SELECT
+          e.id,
+          e.type,
+          d.width,
+          d.height,
+          string_agg(
+            COALESCE(m.mark, '0') , '' ORDER BY c.cell) AS board_string
+        FROM effective_roles e
+        JOIN dimensions d ON e.type = d.type
+        LEFT JOIN (
+          SELECT id, cell, mark FROM marked
+        ) m ON e.id = m.id
+        LEFT JOIN generate_series(1, (SELECT MAX(width*height) FROM dimensions)) AS c(cell) ON true
+        GROUP BY e.id, e.type, d.width, d.height
+      )
+      SELECT 
+        e.id,
+        e.type,
+        e.creator,
+        e.joiner,
+        e.x_player,
+        e.o_player,
+        b.width,
+        b.height,
+        b.board_string
+      FROM effective_roles e
+      JOIN board_cells b ON e.id = b.id;
+  - name: okinoko_iarv2_waiting_for_join
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_waiting_for_join AS
+      WITH created AS (
+        SELECT 
+          id,
+          by AS creator,
+          betamount,
+          betasset,
+          type,
+          fmcosts,
+          name,
+          indexer_block_height AS created_block
+        FROM okinoko_iarv2_created_events
+      ),
+      joined AS (
+        SELECT DISTINCT id FROM okinoko_iarv2_joined_events
+      ),
+      finished AS (
+        SELECT id FROM okinoko_iarv2_won_events
+        UNION
+        SELECT id FROM okinoko_iarv2_resign_events
+        UNION
+        SELECT id FROM okinoko_iarv2_timeout_events
+        UNION
+        SELECT id FROM okinoko_iarv2_draw_events
+      )
+      SELECT 
+        c.id,
+        c.creator,
+        c.betamount,
+        c.betasset,
+        c.type,
+        c.fmcosts,
+        c.name,
+        c.created_block
+      FROM created c
+      LEFT JOIN joined j ON c.id = j.id
+      LEFT JOIN finished f ON c.id = f.id
+      WHERE j.id IS NULL  -- not yet joined
+        AND f.id IS NULL  -- not finished
+      ORDER BY c.created_block DESC;
+  # Active games with next turn player indicated 
+  
+  - name: okinoko_iarv2_active_with_turn
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_active_with_turn AS
+      WITH latest_joined AS (
+        SELECT
+          id,
+          by,
+          fmp,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_joined_events
+      ),
+      roles AS (
+        -- Determine creator/joiner and X/O assignment (considering FMC)
+        SELECT
+          base.id,
+          base.creator,
+          base.joiner,
+          base.type,
+          base.betamount,
+          base.betasset,
+          base.fmc,
+          base.name,
+          CASE
+            WHEN base.joiner_has_fmp THEN base.joiner  -- FMC: joiner = X
+            ELSE base.creator                          -- normal: creator = X
+          END AS x_player,
+          CASE
+            WHEN base.joiner_has_fmp THEN base.creator  -- FMC: creator = O
+            ELSE base.joiner                            -- normal: joiner = O
+          END AS o_player
+        FROM (
+          SELECT
+            c.id,
+            c.by AS creator,
+            j.by AS joiner,
+            c.type,
+            c.betamount,
+            c.betasset,
+            c.fmcosts AS fmc,
+            c.name,
+            COALESCE(LOWER(j.fmp) = 'true', FALSE) AS joiner_has_fmp
+          FROM okinoko_iarv2_created_events c
+          LEFT JOIN latest_joined j ON c.id = j.id AND j.rn = 1
+        ) base
+      ),
+      swap_counts AS (
+        SELECT
+          id,
+          COUNT(*) FILTER (WHERE operation = 'place') AS place_count,
+          COUNT(*) FILTER (WHERE operation = 'add') AS add_count,
+          COUNT(*) FILTER (WHERE operation = 'choose') AS choose_count,
+          COUNT(*) FILTER (WHERE operation = 'color') AS color_count,
+          BOOL_OR(choice = 'swap') AS has_choice_swap,
+          BOOL_OR(operation = 'color' AND color = 2) AS has_color_swap
+        FROM okinoko_iarv2_swap_events
+        GROUP BY id
+      ),
+      latest_swap_choice AS (
+        SELECT DISTINCT ON (id)
+          id,
+          choice AS last_choice
+        FROM okinoko_iarv2_swap_events
+        WHERE operation = 'choose' AND choice IS NOT NULL
+        ORDER BY id, indexer_block_height DESC
+      ),
+      swap_state AS (
+        SELECT
+          c.id,
+          c.place_count,
+          c.add_count,
+          c.choose_count,
+          c.color_count,
+          (COALESCE(c.has_choice_swap, FALSE) OR COALESCE(c.has_color_swap, FALSE)) AS force_swap,
+          lc.last_choice
+        FROM swap_counts c
+        LEFT JOIN latest_swap_choice lc ON c.id = lc.id
+      ),
+      effective_roles AS (
+        -- Handle Gomoku (type 3/6) swaps — swap changes who is X
+        SELECT
+          r.id,
+          r.creator,
+          r.joiner,
+          r.type,
+          r.betamount,
+          r.betasset,
+          r.fmc,
+          r.name,
+          COALESCE(ss.place_count, 0) AS swap_place_count,
+          COALESCE(ss.add_count, 0) AS swap_add_count,
+          COALESCE(ss.choose_count, 0) AS swap_choose_count,
+          COALESCE(ss.color_count, 0) AS swap_color_count,
+          ss.last_choice AS swap_last_choice,
+          CASE
+            WHEN r.type IN (3,6) AND COALESCE(ss.force_swap, FALSE)
+            THEN r.joiner
+            ELSE r.x_player
+          END AS x_player,
+          CASE
+            WHEN r.type IN (3,6) AND COALESCE(ss.force_swap, FALSE)
+            THEN r.creator
+            ELSE r.o_player
+          END AS o_player
+        FROM roles r
+        LEFT JOIN swap_state ss ON r.id = ss.id
+      ),
+      last_move AS (
+        SELECT 
+          id,
+          by AS last_move_by,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_iarv2_move_events
+      ),
+      finished AS (
+        SELECT id FROM okinoko_iarv2_won_events
+        UNION ALL SELECT id FROM okinoko_iarv2_resign_events
+        UNION ALL SELECT id FROM okinoko_iarv2_timeout_events
+        UNION ALL SELECT id FROM okinoko_iarv2_draw_events
+      ),
+      active AS (
+        SELECT DISTINCT e.id
+        FROM okinoko_iarv2_created_events e
+        LEFT JOIN finished f ON e.id = f.id
+        WHERE f.id IS NULL
+      )
+      SELECT
+        e.id,
+        e.type,
+        e.creator,
+        e.joiner,
+        e.x_player,
+        e.o_player,
+        m.last_move_by,
+        CASE
+          WHEN m.last_move_by IS NULL THEN
+            CASE
+              WHEN e.type IN (3,6) THEN
+                CASE
+                  WHEN e.swap_place_count = 0 THEN e.x_player           -- opening not started
+                  WHEN e.swap_color_count > 0 THEN e.o_player           -- color picked after add flow
+                  WHEN e.swap_last_choice = 'swap' THEN e.o_player      -- swap decision made
+                  WHEN e.swap_last_choice = 'stay' THEN e.o_player      -- stay decision made
+                  WHEN e.swap_last_choice = 'add' AND e.swap_add_count >= 2 THEN e.x_player  -- waiting for color choice
+                  WHEN e.swap_last_choice = 'add' THEN e.o_player       -- add flow placements (O placing stones)
+                  WHEN e.swap_place_count >= 3 THEN e.o_player          -- initial three placements done → O chooses
+                  ELSE e.x_player
+                END
+              ELSE e.x_player
+            END
+          WHEN m.last_move_by = e.x_player THEN e.o_player       -- X just moved → O's turn
+          ELSE e.x_player                                        -- O just moved → X's turn
+        END AS next_turn_player,
+        e.betamount,
+        e.betasset,
+        e.fmc,
+        e.name,
+        CASE
+          WHEN e.type NOT IN (3,6) THEN 'm'
+          WHEN e.swap_color_count > 0 THEN 'm'                         -- final color selected
+          WHEN e.swap_last_choice IN ('swap', 'stay') THEN 'm'         -- swap phase resolved
+          WHEN e.swap_place_count < 3 THEN 's_1'                       -- initial placements
+          WHEN e.swap_choose_count = 0 THEN 's_2'                      -- waiting for joiner decision
+          WHEN e.swap_last_choice = 'add' AND e.swap_add_count < 2 THEN 's_2'  -- joiner placing extra stones
+          WHEN e.swap_last_choice = 'add' AND e.swap_add_count >= 2 THEN 's_3' -- creator chooses color
+          ELSE 'm'
+        END AS movetype
+      FROM effective_roles e
+      LEFT JOIN last_move m ON e.id = m.id AND m.rn = 1
+      WHERE e.id IN (SELECT id FROM active)
+      ORDER BY e.id;
+
+  # Joined events with creator/name attached for notifications
+  - name: okinoko_iarv2_joined_with_creator
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_joined_with_creator AS
+      SELECT
+        j.id,
+        j.by,
+        j.fmp,
+        j.indexer_block_height,
+        j.indexer_ts,
+        c.by AS game_creator,
+        c.name AS game_name
+      FROM okinoko_iarv2_joined_events j
+      LEFT JOIN okinoko_iarv2_created_events c ON c.id = j.id;
+
+  # Move events with computed next_turn_player attached for notifications
+  - name: okinoko_iarv2_moves_with_next
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_iarv2_moves_with_next AS
+      SELECT
+        m.id,
+        m.by,
+        m.cell,
+        m.indexer_block_height,
+        m.indexer_ts,
+        a.next_turn_player
+      FROM okinoko_iarv2_move_events m
+      LEFT JOIN okinoko_iarv2_active_with_turn a ON a.id = m.id;

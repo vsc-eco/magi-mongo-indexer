@@ -1,0 +1,71 @@
+# ===============================
+# MAPPINGS CONFIGURATION
+# ===============================
+#
+# This file defines how contract events are mapped into Postgres tables.
+# Each contract has its own entry under `contracts:`, and each event
+# within that contract appears under its `events:` list.
+#
+# Structure:
+# contracts:
+#   - address: "<contract address>"
+#     fromBlockHeight: <optional number>
+#     events:
+#       - log_type: "<short type>"
+#         table: "<table_name>"
+#         schema: { column: type }
+#         parse: "json" | "csv"
+#         delimiter: "|"            # only for CSV
+#         key_delimiter: "="        # only for CSV
+#         fields: { column: selector }
+#
+# ===============================
+
+contracts:
+  - address: "vsc1BgfucQVHwYBHuK2yMEv4AhYua9rtQ45Uoe"   # Escrow contract
+    fromBlockHeight: 5000
+    events:
+      # Escrow Created event
+      - log_type: "cr"
+        table: "okinoko_escrow_created_events"
+        schema:
+          id: numeric
+          from: string
+          to: string
+          arbitrator: string
+          amount: numeric
+          asset: string
+        parse: "json"
+        fields:
+          id: "$.attributes.id"
+          from: "$.attributes.f"
+          to: "$.attributes.t"
+          arbitrator: "$.attributes.arb"
+          amount: "$.attributes.am"
+          asset: "$.attributes.as"
+
+      # Escrow Decision event
+      - log_type: "de"
+        table: "okinoko_escrow_decision_events"
+        schema:
+          id: numeric
+          role: string
+          address: string
+          decision: string
+        parse: "json"
+        fields:
+          id: "$.attributes.id"
+          role: "$.attributes.r"
+          address: "$.attributes.a"
+          decision: "$.attributes.d"
+
+      # Escrow Closed event
+      - log_type: "cl"
+        table: "okinoko_escrow_closed_events"
+        schema:
+          id: numeric
+          outcome: string
+        parse: "json"
+        fields:
+          id: "$.attributes.id"
+          outcome: "$.attributes.o"

@@ -1,0 +1,186 @@
+# ===============================
+# LOTTERY CONTRACT MAPPINGS
+# ===============================
+#
+# This file defines how okinoko-takara lottery contract events are mapped into Postgres tables.
+# The lottery contract emits 6 event types:
+#   - lc: Lottery Created
+#   - lj: Lottery Joined (participant bought tickets)
+#   - le: Lottery Executed (lottery drawn)
+#   - lp: Lottery Payout (winner received funds)
+#   - ld: Lottery Donation (donation sent)
+#   - lu: Lottery Undistributed (leftover funds sent to null)
+#
+# Format: CSV with pipe delimiter (|) and colon key delimiter (:)
+# Example: lc|id:1|creator:vsc1...|name:Test|created_at:1234567890|deadline:1234567900|burn:5.00|ticket:1.000|asset:HIVE|winners:3|shares:50.00,30.00,20.00
+#
+# ===============================
+
+contracts:
+  - address: "vsc1BkMXD6vq1f3mScCeZQZKY3tLEZshfP4ZX2"   # Lottery contract
+    fromBlockHeight: 5000
+    events:
+      # =========================================
+      # Lottery Created Event (lc)
+      # =========================================
+      # Emitted when a new lottery is created
+      # Fields: id, creator, name, created_at, deadline, burn, ticket, asset, winners, shares,
+      #         donation_account (optional), donation_percent (optional)
+      - log_type: "lc"
+        table: "okinoko_lottery_created_events"
+        schema:
+          id: numeric
+          creator: string
+          name: string
+          created_at: numeric
+          deadline: numeric
+          burn: numeric
+          ticket: numeric
+          asset: string
+          winners: numeric
+          shares: string
+          donation_account: string
+          donation_percent: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          creator: "2"
+          name: "3"
+          created_at: "4"
+          deadline: "5"
+          burn: "6"
+          ticket: "7"
+          asset: "8"
+          winners: "9"
+          shares: "10"
+          donation_account: "11"
+          donation_percent: "12"
+
+      # =========================================
+      # Lottery Joined Event (lj)
+      # =========================================
+      # Emitted when a participant buys tickets
+      # Fields: id, participant, tickets, paid, asset, ticket_start, ticket_end
+      - log_type: "lj"
+        table: "okinoko_lottery_joined_events"
+        schema:
+          id: numeric
+          participant: string
+          tickets: numeric
+          paid: numeric
+          asset: string
+          ticket_start: numeric
+          ticket_end: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          participant: "2"
+          tickets: "3"
+          paid: "4"
+          asset: "5"
+          ticket_start: "6"
+          ticket_end: "7"
+
+      # =========================================
+      # Lottery Executed Event (le)
+      # =========================================
+      # Emitted when a lottery is drawn/executed
+      # Fields: id, pool, burned, donated, asset, winners, seed, tickets, participants, executed_at
+      - log_type: "le"
+        table: "okinoko_lottery_executed_events"
+        schema:
+          id: numeric
+          pool: numeric
+          burned: numeric
+          donated: numeric
+          asset: string
+          winners: numeric
+          seed: numeric
+          tickets: numeric
+          participants: numeric
+          executed_at: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          pool: "2"
+          burned: "3"
+          donated: "4"
+          asset: "5"
+          winners: "6"
+          seed: "7"
+          tickets: "8"
+          participants: "9"
+          executed_at: "10"
+
+      # =========================================
+      # Lottery Payout Event (lp)
+      # =========================================
+      # Emitted for each winner when they receive their prize
+      # Fields: id, winner, amount, share, asset, position
+      - log_type: "lp"
+        table: "okinoko_lottery_payout_events"
+        schema:
+          id: numeric
+          winner: string
+          amount: numeric
+          share: numeric
+          asset: string
+          position: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          winner: "2"
+          amount: "3"
+          share: "4"
+          asset: "5"
+          position: "6"
+
+      # =========================================
+      # Lottery Donation Event (ld)
+      # =========================================
+      # Emitted when a donation is sent to the configured recipient
+      # Fields: id, recipient, amount, percent, asset
+      - log_type: "ld"
+        table: "okinoko_lottery_donation_events"
+        schema:
+          id: numeric
+          recipient: string
+          amount: numeric
+          percent: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          recipient: "2"
+          amount: "3"
+          percent: "4"
+          asset: "5"
+
+      # =========================================
+      # Lottery Undistributed Event (lu)
+      # =========================================
+      # Emitted when leftover funds are sent to null account
+      # Fields: id, amount, asset
+      - log_type: "lu"
+        table: "okinoko_lottery_undistributed_events"
+        schema:
+          id: numeric
+          amount: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          amount: "2"
+          asset: "3"

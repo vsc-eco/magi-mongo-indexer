@@ -1,0 +1,148 @@
+# ================================
+# Database Views
+# ================================
+# Each entry defines a Postgres view to be created or updated.
+# Fields:
+#   - name: SQL view name (≤ 63 chars).
+#   - sql:  Full CREATE OR REPLACE VIEW statement.
+#
+# Best practice:
+#   - Prefix view names with contract slug to avoid collisions.
+#   - Reference the event tables created in mappings.yaml.
+
+# ================================
+# Database Views for Escrow Indexer
+# ================================
+
+views:
+
+  # Combine all escrow logs into a single event stream view
+  - name: okinoko_escrow_all_events
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_escrow_all_events AS
+      SELECT 
+        'created' AS event_type,
+        id,
+        "from",
+        "to",
+        arbitrator,
+        amount,
+        asset,
+        NULL::text AS role,
+        NULL::text AS address,
+        NULL::text AS decision,
+        NULL::text AS outcome,
+        indexer_block_height
+      FROM okinoko_escrow_created_events
+
+      UNION ALL
+
+      SELECT
+        'decision' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL,
+        role,
+        address,
+        decision,
+        NULL,
+        indexer_block_height
+      FROM okinoko_escrow_decision_events
+
+      UNION ALL
+
+      SELECT
+        'closed' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL,
+        NULL,
+        NULL,
+        outcome,
+        indexer_block_height
+      FROM okinoko_escrow_closed_events;
+
+
+  # Latest decision per escrow id
+  - name: okinoko_escrow_latest_decision
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_escrow_latest_decision AS
+      WITH latest AS (
+        SELECT 
+          id,
+          decision,
+          role,
+          address,
+          indexer_block_height,
+          ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
+        FROM okinoko_escrow_decision_events
+      )
+      SELECT id, decision, role, address, indexer_block_height
+      FROM latest
+      WHERE rn = 1;
+
+
+  # Current state of every escrow contract
+  - name: okinoko_escrow_current_state
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_escrow_current_state AS
+      WITH created AS (
+        SELECT 
+          id,
+          "from",
+          "to",
+          arbitrator,
+          amount,
+          asset,
+          indexer_block_height AS created_block
+        FROM okinoko_escrow_created_events
+      ),
+      closed AS (
+        SELECT 
+          id,
+          outcome,
+          indexer_block_height AS closed_block
+        FROM okinoko_escrow_closed_events
+      ),
+      decisions AS (
+        SELECT
+          id,
+          decision,
+          role,
+          address,
+          indexer_block_height AS decision_block
+        FROM okinoko_escrow_latest_decision
+      )
+      SELECT
+        c.id,
+        c."from" AS payer,
+        c."to" AS payee,
+        c.arbitrator,
+        c.amount,
+        c.asset,
+        c.created_block,
+        d.decision,
+        d.role AS last_decision_by_role,
+        d.address AS last_decision_address,
+        d.decision_block AS last_decision_block,
+        CASE WHEN cl.closed_block IS NOT NULL THEN true ELSE false END AS closed,
+        cl.outcome,
+        cl.closed_block
+      FROM created c
+      LEFT JOIN decisions d ON c.id = d.id
+      LEFT JOIN closed cl ON c.id = cl.id;
+
+
+  # Simple view for queries — shows open escrows only
+  - name: okinoko_escrow_open
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_escrow_open AS
+      SELECT *
+      FROM okinoko_escrow_current_state
+      WHERE NOT closed;
+
+
+  # Simple explorer view — shows all escrow events raw
+  - name: okinoko_escrow_events_view
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_escrow_events_view AS
+      SELECT * FROM okinoko_escrow_all_events;

@@ -1,0 +1,481 @@
+# ================================
+# Database Views for Lottery Indexer
+# ================================
+# These views provide convenient access patterns for building the lottery UI.
+# They combine data from multiple event tables to provide complete lottery state,
+# participant information, winner data, and more.
+#
+# ================================
+
+views:
+
+  # =========================================
+  # All Events Stream
+  # =========================================
+  # Unified view of all lottery events for event log/history displays
+  - name: okinoko_lottery_all_events
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_all_events AS
+      SELECT
+        'created' AS event_type,
+        id,
+        creator,
+        name,
+        created_at,
+        deadline,
+        burn,
+        ticket,
+        asset,
+        winners,
+        shares,
+        donation_account,
+        donation_percent,
+        NULL::text AS participant,
+        NULL::numeric AS tickets,
+        NULL::numeric AS paid,
+        NULL::numeric AS ticket_start,
+        NULL::numeric AS ticket_end,
+        NULL::numeric AS pool,
+        NULL::numeric AS burned,
+        NULL::numeric AS donated,
+        NULL::numeric AS seed,
+        NULL::numeric AS total_tickets,
+        NULL::numeric AS participants,
+        NULL::numeric AS executed_at,
+        NULL::text AS winner,
+        NULL::numeric AS amount,
+        NULL::numeric AS share,
+        NULL::numeric AS position,
+        NULL::text AS recipient,
+        NULL::numeric AS percent,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_created_events
+
+      UNION ALL
+
+      SELECT
+        'joined' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        participant,
+        tickets,
+        paid,
+        ticket_start,
+        ticket_end,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_joined_events
+
+      UNION ALL
+
+      SELECT
+        'executed' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        pool,
+        burned,
+        donated,
+        seed,
+        tickets AS total_tickets,
+        participants,
+        executed_at,
+        NULL, NULL, NULL, NULL,
+        NULL, NULL,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_executed_events
+
+      UNION ALL
+
+      SELECT
+        'payout' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        winner,
+        amount,
+        share,
+        position,
+        NULL, NULL,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_payout_events
+
+      UNION ALL
+
+      SELECT
+        'donation' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL,
+        recipient,
+        percent,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_donation_events
+
+      UNION ALL
+
+      SELECT
+        'undistributed' AS event_type,
+        id,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+        NULL,
+        amount,
+        NULL, NULL,
+        NULL, NULL,
+        indexer_block_height,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_undistributed_events
+      ORDER BY indexer_block_height DESC;
+
+
+  # =========================================
+  # Lottery Current State
+  # =========================================
+  # Comprehensive view showing the complete current state of each lottery
+  # Combines created, executed, and aggregated participant/winner data
+  - name: okinoko_lottery_current_state
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_current_state AS
+      WITH created AS (
+        SELECT
+          id,
+          creator,
+          name,
+          created_at,
+          deadline,
+          burn,
+          ticket,
+          asset,
+          winners AS winner_count,
+          shares,
+          donation_account,
+          donation_percent,
+          indexer_block_height AS created_block,
+          indexer_ts AS created_timestamp
+        FROM okinoko_lottery_created_events
+      ),
+      executed AS (
+        SELECT
+          id,
+          pool,
+          burned,
+          donated,
+          winners,
+          seed,
+          tickets,
+          participants,
+          executed_at,
+          indexer_block_height AS executed_block,
+          indexer_ts AS executed_timestamp
+        FROM okinoko_lottery_executed_events
+      ),
+      participant_stats AS (
+        SELECT
+          id,
+          COUNT(DISTINCT participant) AS unique_participants,
+          SUM(tickets) AS total_tickets_sold,
+          SUM(paid) AS total_collected
+        FROM okinoko_lottery_joined_events
+        GROUP BY id
+      ),
+      winner_list AS (
+        SELECT
+          id,
+          array_agg(winner ORDER BY position) AS winners,
+          array_agg(amount ORDER BY position) AS winner_amounts,
+          SUM(amount) AS total_paid_to_winners
+        FROM okinoko_lottery_payout_events
+        GROUP BY id
+      )
+      SELECT
+        c.id,
+        c.creator,
+        c.name,
+        c.created_at,
+        c.deadline,
+        c.burn AS burn_percent,
+        c.ticket AS ticket_price,
+        c.asset,
+        c.winner_count,
+        c.shares AS winner_shares,
+        c.donation_account,
+        c.donation_percent,
+        c.created_block,
+        c.created_timestamp,
+        COALESCE(ps.unique_participants, 0) AS unique_participants,
+        COALESCE(ps.total_tickets_sold, 0) AS total_tickets_sold,
+        COALESCE(ps.total_collected, 0) AS total_collected,
+        CASE
+          WHEN e.executed_at IS NOT NULL THEN true
+          ELSE false
+        END AS is_executed,
+        CASE
+          WHEN e.executed_at IS NOT NULL THEN true
+          WHEN EXTRACT(EPOCH FROM NOW()) > c.deadline THEN true
+          ELSE false
+        END AS is_closed,
+        e.pool,
+        e.burned,
+        e.donated,
+        e.seed AS random_seed,
+        e.executed_at,
+        e.executed_block,
+        e.executed_timestamp,
+        w.winners,
+        w.winner_amounts,
+        w.total_paid_to_winners
+      FROM created c
+      LEFT JOIN executed e ON c.id = e.id
+      LEFT JOIN participant_stats ps ON c.id = ps.id
+      LEFT JOIN winner_list w ON c.id = w.id;
+
+
+  # =========================================
+  # Active Lotteries
+  # =========================================
+  # Shows only lotteries that are currently active (not executed and before deadline)
+  - name: okinoko_lottery_active
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_active AS
+      SELECT *
+      FROM okinoko_lottery_current_state
+      WHERE NOT is_executed
+        AND deadline > EXTRACT(EPOCH FROM NOW());
+
+
+  # =========================================
+  # Completed Lotteries
+  # =========================================
+  # Shows lotteries that have been executed
+  - name: okinoko_lottery_completed
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_completed AS
+      SELECT *
+      FROM okinoko_lottery_current_state
+      WHERE is_executed
+      ORDER BY executed_at DESC;
+
+
+  # =========================================
+  # Participant Summary
+  # =========================================
+  # Per-participant view showing all their lottery participations
+  - name: okinoko_lottery_participant_summary
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_participant_summary AS
+      SELECT
+        j.participant,
+        j.id AS lottery_id,
+        c.name AS lottery_name,
+        j.tickets,
+        j.paid,
+        j.asset,
+        j.ticket_start,
+        j.ticket_end,
+        j.indexer_block_height,
+        j.indexer_ts,
+        c.is_executed,
+        CASE
+          WHEN w.winner IS NOT NULL THEN true
+          ELSE false
+        END AS is_winner,
+        w.amount AS win_amount,
+        w.position AS win_position
+      FROM okinoko_lottery_joined_events j
+      JOIN okinoko_lottery_current_state c ON j.id = c.id
+      LEFT JOIN okinoko_lottery_payout_events w
+        ON j.id = w.id AND j.participant = w.winner
+      ORDER BY j.indexer_block_height DESC;
+
+
+  # =========================================
+  # User Lottery History
+  # =========================================
+  # Aggregated statistics per participant across all lotteries
+  - name: okinoko_lottery_user_stats
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_user_stats AS
+      SELECT
+        participant,
+        COUuser_staNT(DISTINCT lottery_id) AS lotteries_entered,
+        SUM(tickets) AS total_tickets_purchased,
+        SUM(paid) AS total_spent,
+        COUNT(DISTINCT CASE WHEN is_winner THEN lottery_id END) AS lotteries_won,
+        COALESCE(SUM(win_amount), 0) AS total_winnings,
+        COALESCE(SUM(win_amount), 0) - SUM(paid) AS net_profit
+      FROM okinoko_lottery_participant_summary
+      GROUP BY participant;
+
+
+  # =========================================
+  # Winners View
+  # =========================================
+  # Complete list of all lottery winners with their details
+  - name: okinoko_lottery_winners
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_winners AS
+      SELECT
+        p.id AS lottery_id,
+        c.name AS lottery_name,
+        c.creator,
+        c.asset,
+        p.winner,
+        p.amount,
+        p.share AS share_percent,
+        p.position,
+        c.total_collected AS lottery_pool,
+        c.executed_at,
+        p.indexer_block_height,
+        p.indexer_ts,
+        p.indexer_tx_hash
+      FROM okinoko_lottery_payout_events p
+      JOIN okinoko_lottery_current_state c ON p.id = c.id
+      ORDER BY c.executed_at DESC, p.position ASC;
+
+
+  # =========================================
+  # Lottery Details (for individual lottery page)
+  # =========================================
+  # Complete information for displaying a single lottery's detail page
+  - name: okinoko_lottery_detail
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_detail AS
+      SELECT
+        s.*,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'participant', participant,
+              'tickets', tickets,
+              'paid', paid,
+              'ticket_start', ticket_start,
+              'ticket_end', ticket_end,
+              'timestamp', indexer_ts
+            ) ORDER BY indexer_block_height
+          )
+          FROM okinoko_lottery_joined_events
+          WHERE id = s.id
+        ) AS participants,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'winner', winner,
+              'amount', amount,
+              'share', share,
+              'position', position
+            ) ORDER BY position
+          )
+          FROM okinoko_lottery_payout_events
+          WHERE id = s.id
+        ) AS winner_details
+      FROM okinoko_lottery_current_state s;
+
+
+  # =========================================
+  # Leaderboard View
+  # =========================================
+  # Top winners and most active participants
+  - name: okinoko_lottery_leaderboard
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_leaderboard AS
+      SELECT
+        participant AS address,
+        total_winnings,
+        lotteries_won,
+        lotteries_entered,
+        total_tickets_purchased,
+        total_spent,
+        net_profit,
+        CASE
+          WHEN lotteries_entered > 0
+          THEN ROUND((lotteries_won::numeric / lotteries_entered::numeric * 100), 2)
+          ELSE 0
+        END AS win_rate_percent,
+        CASE
+          WHEN total_spent > 0
+          THEN ROUND((total_winnings / total_spent), 2)
+          ELSE 0
+        END AS roi_multiplier
+      FROM okinoko_lottery_user_stats
+      ORDER BY total_winnings DESC;
+
+
+  # =========================================
+  # Creator Dashboard View
+  # =========================================
+  # Summary for lottery creators showing their created lotteries
+  - name: okinoko_lottery_creator_dashboard
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_creator_dashboard AS
+      SELECT
+        creator,
+        COUNT(*) AS lotteries_created,
+        COUNT(CASE WHEN is_executed THEN 1 END) AS lotteries_completed,
+        COUNT(CASE WHEN NOT is_closed THEN 1 END) AS lotteries_active,
+        COALESCE(SUM(total_collected), 0) AS total_volume,
+        COALESCE(SUM(CASE WHEN is_executed THEN burned ELSE 0 END), 0) AS total_burned,
+        COALESCE(SUM(CASE WHEN is_executed THEN donated ELSE 0 END), 0) AS total_donated,
+        COALESCE(SUM(unique_participants), 0) AS total_participants
+      FROM okinoko_lottery_current_state
+      GROUP BY creator;
+
+
+  # =========================================
+  # Recent Activity Feed
+  # =========================================
+  # Latest 100 lottery events for activity feeds
+  - name: okinoko_lottery_recent_activity
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_recent_activity AS
+      SELECT
+        event_type,
+        id AS lottery_id,
+        COALESCE(participant, winner, creator, recipient) AS actor,
+        COALESCE(tickets, amount) AS value,
+        asset,
+        indexer_ts,
+        indexer_tx_hash
+      FROM okinoko_lottery_all_events
+      ORDER BY indexer_block_height DESC
+      LIMIT 100;
+
+
+  # =========================================
+  # Lottery Statistics
+  # =========================================
+  # Global statistics across all lotteries
+  - name: okinoko_lottery_global_stats
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_lottery_global_stats AS
+      SELECT
+        COUNT(*) AS total_lotteries,
+        COUNT(CASE WHEN is_executed THEN 1 END) AS completed_lotteries,
+        COUNT(CASE WHEN NOT is_closed THEN 1 END) AS active_lotteries,
+        COALESCE(SUM(total_collected), 0) AS total_volume,
+        COALESCE(SUM(burned), 0) AS total_burned,
+        COALESCE(SUM(donated), 0) AS total_donated,
+        COALESCE(SUM(total_tickets_sold), 0) AS total_tickets_sold,
+        COUNT(DISTINCT creator) AS unique_creators,
+        (
+          SELECT COUNT(DISTINCT participant)
+          FROM okinoko_lottery_joined_events
+        ) AS unique_participants
+      FROM okinoko_lottery_current_state;

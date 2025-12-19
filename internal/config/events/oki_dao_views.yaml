@@ -1,0 +1,963 @@
+# ================================
+# Database Views
+# ================================
+# Each entry defines a Postgres view to be created or updated.
+# Fields:
+#   - name: SQL view name (≤ 63 chars).
+#   - sql:  Full CREATE OR REPLACE VIEW statement.
+#
+# Best practice:
+#   - Prefix view names with contract slug to avoid collisions.
+#   - Reference the event tables created in mappings.yaml.
+
+# ================================
+# Database Views for Okinoko DAO Indexer
+# ================================
+
+views:
+
+  - name: okinoko_dao_all_events
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_all_events AS
+      SELECT
+        'project_created' AS event_type,
+        project_id,
+        NULL::numeric AS proposal_id,
+        created_by AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        name AS project_name,
+        description AS project_description,
+        metadata AS project_metadata,
+        url AS project_url,
+        voting_system,
+        threshold_percent,
+        quorum_percent,
+        proposal_duration_hours,
+        execution_delay_hours,
+        leave_cooldown_hours,
+        proposal_cost,
+        stake_min_amount,
+        funds_asset AS project_funds_asset,
+        membership_contract,
+        membership_function,
+        membership_nft,
+        membership_payload,
+        proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_project_created_events
+
+      UNION ALL
+
+      SELECT
+        'member_joined' AS event_type,
+        project_id,
+        NULL::numeric AS proposal_id,
+        member AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_member_joined_events
+
+      UNION ALL
+
+      SELECT
+        'member_left' AS event_type,
+        project_id,
+        NULL::numeric AS proposal_id,
+        member AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_member_left_events
+
+      UNION ALL
+
+      SELECT
+        'funds_added' AS event_type,
+        project_id,
+        NULL::numeric AS proposal_id,
+        added_by AS account,
+        NULL::text AS counterparty,
+        amount,
+        asset,
+        to_stake AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text As proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_funds_added_events
+
+      UNION ALL
+
+      SELECT
+        'funds_removed' AS event_type,
+        project_id,
+        NULL::numeric AS proposal_id,
+        to_address AS account,
+        NULL::text AS counterparty,
+        amount,
+        asset,
+        from_stake AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_funds_removed_events
+
+      UNION ALL
+
+      SELECT
+        'proposal_created' AS event_type,
+        project_id,
+        proposal_id,
+        created_by AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        name AS proposal_name,
+        description AS proposal_description,
+        metadata AS proposal_metadata,
+        url AS proposal_url,
+        options AS proposal_options,
+        payouts AS proposal_payouts,
+        outcome_meta AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_proposal_created_events
+
+      UNION ALL
+
+      SELECT
+        'proposal_state' AS event_type,
+        NULL::numeric AS project_id,
+        proposal_id,
+        NULL::text AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_proposal_state_events
+
+      UNION ALL
+
+      SELECT
+        'proposal_ready' AS event_type,
+        project_id,
+        proposal_id,
+        NULL::text AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_proposal_ready_events
+
+      UNION ALL
+
+      SELECT
+        'proposal_result' AS event_type,
+        project_id,
+        proposal_id,
+        NULL::text AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_proposal_result_events
+
+      UNION ALL
+
+      SELECT
+        'proposal_meta' AS event_type,
+        project_id,
+        proposal_id,
+        NULL::text AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        field,
+        old_value,
+        new_value,
+        NULL::text AS choices,
+        NULL::numeric AS weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_proposal_meta_events
+
+      UNION ALL
+
+      SELECT
+        'vote_cast' AS event_type,
+        NULL::numeric AS project_id,
+        proposal_id,
+        voter AS account,
+        NULL::text AS counterparty,
+        NULL::numeric AS amount,
+        NULL::text AS asset,
+        NULL::boolean AS stake_flag,
+        NULL::text AS state,
+        NULL::numeric AS ready_at,
+        NULL::text AS result,
+        NULL::text AS field,
+        NULL::text AS old_value,
+        NULL::text AS new_value,
+        choices,
+        weight,
+        NULL::text AS project_name,
+        NULL::text AS project_description,
+        NULL::text AS project_metadata,
+        NULL::text AS project_url,
+        NULL::text AS voting_system,
+        NULL::numeric AS threshold_percent,
+        NULL::numeric AS quorum_percent,
+        NULL::numeric AS proposal_duration_hours,
+        NULL::numeric AS execution_delay_hours,
+        NULL::numeric AS leave_cooldown_hours,
+        NULL::numeric AS proposal_cost,
+        NULL::numeric AS stake_min_amount,
+        NULL::text AS project_funds_asset,
+        NULL::text AS membership_contract,
+        NULL::text AS membership_function,
+        NULL::text AS membership_nft,
+        NULL::text AS membership_payload,
+        NULL::boolean AS proposals_members_only,
+        NULL::text AS proposal_name,
+        NULL::text AS proposal_description,
+        NULL::text AS proposal_metadata,
+        NULL::text AS proposal_url,
+        NULL::text AS proposal_options,
+        NULL::text AS proposal_payouts,
+        NULL::text AS proposal_outcome_meta,
+        indexer_block_height
+      FROM okinoko_dao_vote_events;
+
+  - name: okinoko_dao_membership_latest
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_membership_latest AS
+      WITH membership_events AS (
+        SELECT project_id, member, true AS joined, indexer_block_height
+        FROM okinoko_dao_member_joined_events
+        UNION ALL
+        SELECT project_id, member, false AS joined, indexer_block_height
+        FROM okinoko_dao_member_left_events
+      ),
+      ranked AS (
+        SELECT
+          project_id,
+          member,
+          joined,
+          indexer_block_height,
+          ROW_NUMBER() OVER (
+            PARTITION BY project_id, member
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM membership_events
+      )
+      SELECT
+        project_id,
+        member,
+        joined AS active,
+        CASE WHEN joined THEN 'joined' ELSE 'left' END AS last_action,
+        indexer_block_height AS last_event_block
+      FROM ranked
+      WHERE rn = 1;
+
+  - name: okinoko_dao_treasury_movements
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_treasury_movements AS
+      SELECT
+        'in' AS direction,
+        project_id,
+        added_by AS account,
+        amount,
+        asset,
+        to_stake AS stake_related,
+        indexer_block_height
+      FROM okinoko_dao_funds_added_events
+
+      UNION ALL
+
+      SELECT
+        'out' AS direction,
+        project_id,
+        to_address AS account,
+        amount,
+        asset,
+        from_stake AS stake_related,
+        indexer_block_height
+      FROM okinoko_dao_funds_removed_events;
+
+  - name: okinoko_dao_stake_balances
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_stake_balances AS
+      WITH stake_movements AS (
+        SELECT
+          project_id,
+          added_by AS account,
+          asset,
+          amount,
+          to_stake AS stake_related,
+          indexer_block_height
+        FROM okinoko_dao_funds_added_events
+        UNION ALL
+        SELECT
+          project_id,
+          to_address AS account,
+          asset,
+          -amount AS amount,
+          from_stake AS stake_related,
+          indexer_block_height
+        FROM okinoko_dao_funds_removed_events
+      )
+      SELECT
+        project_id,
+        account,
+        asset,
+        SUM(amount) AS stake_amount
+      FROM stake_movements
+      WHERE stake_related = true
+      GROUP BY project_id, account, asset;
+
+  - name: okinoko_dao_proposal_latest_state
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_proposal_latest_state AS
+      WITH ranked AS (
+        SELECT
+          proposal_id,
+          state,
+          indexer_block_height,
+          ROW_NUMBER() OVER (
+            PARTITION BY proposal_id
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_state_events
+      )
+      SELECT
+        proposal_id,
+        state,
+        indexer_block_height AS state_block
+      FROM ranked
+      WHERE rn = 1;
+
+  - name: okinoko_dao_proposal_summary
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_proposal_summary AS
+      WITH creation AS (
+        SELECT
+          proposal_id,
+          project_id,
+          created_by,
+          name,
+          description,
+          metadata,
+          options,
+          payouts,
+          outcome_meta,
+          duration_hours,
+          is_poll,
+          indexer_block_height AS created_block,
+          url
+        FROM okinoko_dao_proposal_created_events
+      ),
+      proposal_meta_ranked AS (
+        SELECT
+          project_id,
+          proposal_id,
+          field,
+          new_value,
+          ROW_NUMBER() OVER (
+            PARTITION BY proposal_id, field
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_meta_events
+        WHERE proposal_id IS NOT NULL
+          AND proposal_id <> 0
+      ),
+      proposal_meta AS (
+        SELECT
+          proposal_id,
+          project_id,
+          MAX(CASE WHEN field = 'name' AND rn = 1 THEN new_value END) AS name,
+          MAX(CASE WHEN field = 'description' AND rn = 1 THEN new_value END) AS description,
+          MAX(CASE WHEN field = 'metadata' AND rn = 1 THEN new_value END) AS metadata,
+          MAX(CASE WHEN field = 'options' AND rn = 1 THEN new_value END) AS options,
+          MAX(CASE WHEN field = 'payouts' AND rn = 1 THEN new_value END) AS payouts,
+          MAX(CASE WHEN field = 'outcomeMeta' AND rn = 1 THEN new_value END) AS outcome_meta,
+          MAX(CASE WHEN field = 'durationHours' AND rn = 1 THEN new_value END) AS duration_hours,
+          MAX(CASE WHEN field = 'url' AND rn = 1 THEN new_value END) AS url
+        FROM proposal_meta_ranked
+        GROUP BY proposal_id, project_id
+      ),
+      state_ranked AS (
+        SELECT
+          proposal_id,
+          state,
+          indexer_block_height,
+          ROW_NUMBER() OVER (
+            PARTITION BY proposal_id
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_state_events
+      ),
+      state AS (
+        SELECT
+          proposal_id,
+          state,
+          indexer_block_height AS state_block
+        FROM state_ranked
+        WHERE rn = 1
+      ),
+      ready_ranked AS (
+        SELECT
+          project_id,
+          proposal_id,
+          ready_at,
+          indexer_block_height,
+          ROW_NUMBER() OVER (
+            PARTITION BY proposal_id
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_ready_events
+      ),
+      ready AS (
+        SELECT
+          project_id,
+          proposal_id,
+          ready_at,
+          indexer_block_height AS ready_block
+        FROM ready_ranked
+        WHERE rn = 1
+      ),
+      result_ranked AS (
+        SELECT
+          project_id,
+          proposal_id,
+          result,
+          indexer_block_height,
+          ROW_NUMBER() OVER (
+            PARTITION BY proposal_id
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_result_events
+      ),
+      result AS (
+        SELECT
+          project_id,
+          proposal_id,
+          result,
+          indexer_block_height AS result_block
+        FROM result_ranked
+        WHERE rn = 1
+      )
+      SELECT
+        COALESCE(ready.project_id, result.project_id, c.project_id) AS project_id,
+        c.proposal_id,
+        c.created_by,
+        c.created_block,
+        COALESCE(pm.name, c.name) AS name,
+        COALESCE(pm.description, c.description) AS description,
+        COALESCE(pm.metadata, c.metadata) AS metadata,
+        COALESCE(pm.options, c.options) AS options,
+        COALESCE(pm.payouts, c.payouts) AS payouts,
+        COALESCE(pm.outcome_meta, c.outcome_meta) AS outcome_meta,
+        COALESCE(NULLIF(pm.duration_hours, '')::numeric, c.duration_hours) AS duration_hours,
+        c.is_poll,
+        state.state,
+        state.state_block,
+        ready.ready_at,
+        ready.ready_block,
+        result.result,
+        result.result_block, 
+        COALESCE(pm.url, c.url) AS url
+      FROM creation c
+      LEFT JOIN state ON c.proposal_id = state.proposal_id
+      LEFT JOIN ready ON c.proposal_id = ready.proposal_id
+      LEFT JOIN result ON c.proposal_id = result.proposal_id
+      LEFT JOIN proposal_meta pm ON c.proposal_id = pm.proposal_id;
+
+  - name: okinoko_dao_votes_view
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_votes_view AS
+      SELECT
+        proposal_id,
+        voter,
+        choices,
+        weight,
+        indexer_block_height
+      FROM okinoko_dao_vote_events;
+
+  - name: okinoko_dao_project_overview
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_project_overview AS
+      WITH project_meta_ranked AS (
+        SELECT
+          project_id,
+          field,
+          new_value,
+          ROW_NUMBER() OVER (
+            PARTITION BY project_id, field
+            ORDER BY indexer_block_height DESC
+          ) AS rn
+        FROM okinoko_dao_proposal_meta_events
+        WHERE proposal_id IS NULL
+          OR proposal_id = 0
+      ),
+      project_meta AS (
+        SELECT
+          project_id,
+          MAX(CASE WHEN field = 'name' AND rn = 1 THEN new_value END) AS name,
+          MAX(CASE WHEN field = 'description' AND rn = 1 THEN new_value END) AS description,
+          MAX(CASE WHEN field = 'metadata' AND rn = 1 THEN new_value END) AS metadata,
+          MAX(CASE WHEN field = 'url' AND rn = 1 THEN new_value END) AS url,
+          MAX(CASE WHEN field = 'fundsAsset' AND rn = 1 THEN new_value END) AS funds_asset,
+          MAX(CASE WHEN field = 'votingSystem' AND rn = 1 THEN new_value END) AS voting_system,
+          MAX(CASE WHEN field = 'thresholdPercent' AND rn = 1 THEN new_value END) AS threshold_percent,
+          MAX(CASE WHEN field = 'quorumPercent' AND rn = 1 THEN new_value END) AS quorum_percent,
+          MAX(CASE WHEN field = 'proposalDurationHours' AND rn = 1 THEN new_value END) AS proposal_duration_hours,
+          MAX(CASE WHEN field = 'executionDelayHours' AND rn = 1 THEN new_value END) AS execution_delay_hours,
+          MAX(CASE WHEN field = 'leaveCooldownHours' AND rn = 1 THEN new_value END) AS leave_cooldown_hours,
+          MAX(CASE WHEN field = 'proposalCost' AND rn = 1 THEN new_value END) AS proposal_cost,
+          MAX(CASE WHEN field = 'stakeMinAmount' AND rn = 1 THEN new_value END) AS stake_min_amount,
+          MAX(CASE WHEN field = 'membershipContract' AND rn = 1 THEN new_value END) AS membership_contract,
+          MAX(CASE WHEN field = 'membershipFunction' AND rn = 1 THEN new_value END) AS membership_function,
+          MAX(CASE WHEN field = 'membershipNFT' AND rn = 1 THEN new_value END) AS membership_nft,
+          MAX(CASE WHEN field = 'membershipPayload' AND rn = 1 THEN new_value END) AS membership_payload,
+          MAX(CASE WHEN field = 'proposalsMembersOnly' AND rn = 1 THEN new_value END) AS proposals_members_only
+        FROM project_meta_ranked
+        GROUP BY project_id
+      )
+      SELECT
+        pc.project_id,
+        pc.created_by,
+        COALESCE(pm.name, pc.name) AS name,
+        COALESCE(pm.description, pc.description) AS description,
+        COALESCE(pm.metadata, pc.metadata) AS metadata,
+        COALESCE(pm.url, pc.url) AS url,
+        COALESCE(pm.funds_asset, pc.funds_asset) AS funds_asset,
+        COALESCE(pm.voting_system, pc.voting_system) AS voting_system,
+        COALESCE(NULLIF(pm.threshold_percent, '')::numeric, pc.threshold_percent) AS threshold_percent,
+        COALESCE(NULLIF(pm.quorum_percent, '')::numeric, pc.quorum_percent) AS quorum_percent,
+        COALESCE(NULLIF(pm.proposal_duration_hours, '')::numeric, pc.proposal_duration_hours) AS proposal_duration_hours,
+        COALESCE(NULLIF(pm.execution_delay_hours, '')::numeric, pc.execution_delay_hours) AS execution_delay_hours,
+        COALESCE(NULLIF(pm.leave_cooldown_hours, '')::numeric, pc.leave_cooldown_hours) AS leave_cooldown_hours,
+        COALESCE(NULLIF(pm.proposal_cost, '')::numeric, pc.proposal_cost) AS proposal_cost,
+        COALESCE(NULLIF(pm.stake_min_amount, '')::numeric, pc.stake_min_amount) AS stake_min_amount,
+        COALESCE(
+          CASE
+            WHEN pm.proposals_members_only IS NULL THEN NULL
+            ELSE NULLIF(pm.proposals_members_only, '')::boolean
+          END,
+          pc.proposals_members_only
+        ) AS proposals_members_only,
+        ml.member,
+        COALESCE(ml.active, false) AS active,
+        ml.last_action,
+        ml.last_event_block,
+        member_lists.active_members,
+        member_lists.members,
+        COALESCE(pm.membership_contract, pc.membership_contract) AS membership_contract,
+        COALESCE(pm.membership_function, pc.membership_function) AS membership_function,
+        COALESCE(pm.membership_nft, pc.membership_nft) AS membership_nft,
+        COALESCE(pm.membership_payload, pc.membership_payload) AS membership_payload
+      FROM okinoko_dao_project_created_events pc
+      LEFT JOIN project_meta pm ON pc.project_id = pm.project_id
+      LEFT JOIN okinoko_dao_membership_latest ml
+        ON pc.project_id = ml.project_id
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY(
+            SELECT ml.member
+            FROM okinoko_dao_membership_latest ml
+            WHERE ml.project_id = pc.project_id
+              AND ml.active = true
+            ORDER BY ml.member
+          ) AS active_members,
+          ARRAY(
+            SELECT ml.member
+            FROM okinoko_dao_membership_latest ml
+            WHERE ml.project_id = pc.project_id
+            ORDER BY ml.member
+          ) AS members
+      ) AS member_lists ON TRUE;
+
+  - name: okinoko_dao_proposal_overview
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_proposal_overview AS
+      SELECT
+        ps.project_id,
+        ps.proposal_id,
+        ps.name,
+        ps.description,
+        ps.metadata,
+        ps.options,
+        ps.payouts,
+        ps.outcome_meta,
+        ps.duration_hours,
+        ps.is_poll,
+        ps.created_by,
+        ps.state,
+        ps.state_block,
+        ps.ready_at,
+        ps.ready_block,
+        ps.result,
+        ps.result_block,
+        ml.member,
+        COALESCE(ml.active, false) AS member_active,
+        ml.last_action,
+        ml.last_event_block,
+        member_lists.active_members,
+        member_lists.members,
+        ps.url
+      FROM okinoko_dao_proposal_summary ps
+      LEFT JOIN okinoko_dao_membership_latest ml
+        ON ps.project_id = ml.project_id
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY(
+            SELECT ml.member
+            FROM okinoko_dao_membership_latest ml
+            WHERE ml.project_id = ps.project_id
+              AND ml.active = true
+            ORDER BY ml.member
+          ) AS active_members,
+          ARRAY(
+            SELECT ml.member
+            FROM okinoko_dao_membership_latest ml
+            WHERE ml.project_id = ps.project_id
+            ORDER BY ml.member
+          ) AS members
+      ) AS member_lists ON TRUE;
+
+  # Proposal created events expanded with active members (one row per member)
+  - name: okinoko_dao_proposal_created_with_members
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_proposal_created_with_members AS
+      SELECT
+        pc.project_id,
+        pc.proposal_id,
+        pc.created_by,
+        pc.name,
+        pc.indexer_block_height,
+        ml.member AS member
+      FROM okinoko_dao_proposal_created_events pc
+      LEFT JOIN okinoko_dao_membership_latest ml
+        ON ml.project_id = pc.project_id
+       AND ml.active = TRUE;
+
+  # Proposal result events expanded with active members (one row per member)
+  - name: okinoko_dao_proposal_result_with_members
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_dao_proposal_result_with_members AS
+      SELECT
+        pr.project_id,
+        pr.proposal_id,
+        pr.result,
+        pr.indexer_block_height,
+        ml.member AS member
+      FROM okinoko_dao_proposal_result_events pr
+      LEFT JOIN okinoko_dao_membership_latest ml
+        ON ml.project_id = pr.project_id
+       AND ml.active = TRUE;

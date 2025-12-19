@@ -1,0 +1,150 @@
+# ===============================
+# MAPPINGS CONFIGURATION
+# ===============================
+#
+# This file defines how contract events are mapped into Postgres tables.
+# Each contract has its own entry under `contracts:`, and each event
+# within that contract appears under its `events:` list.
+#
+# Structure:
+# contracts:
+#   - address: "<contract address>"
+#     fromBlockHeight: <optional number>
+#     events:
+#       - log_type: "<short type>"
+#         table: "<table_name>"
+#         schema: { column: type }
+#         parse: "json" | "csv"
+#         delimiter: "|"            # only for CSV
+#         key_delimiter: "="        # only for CSV
+#         fields: { column: selector }
+#
+# ===============================
+
+contracts:
+  - address: "vsc1BVLuXCWC1UShtDBenWJ2B6NWpnyV2T637n"   # Inarow game contract
+    fromBlockHeight: 5000
+    events:
+      # Game created
+      - log_type: "c"
+        table: "okinoko_iarv2_created_events"
+        schema:
+          id: numeric
+          by: string
+          betamount: numeric
+          betasset: string
+          type: numeric
+          fmcosts: numeric
+          name: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          by: "2"
+          betamount: "3"
+          betasset: "4"
+          type: "5"
+          fmcosts: "6"
+          name: "7"
+
+      # Game joined
+      - log_type: "j"
+        table: "okinoko_iarv2_joined_events"
+        schema:
+          id: numeric
+          by: string
+          fmp: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          by: "2"
+          fmp: "3"
+
+      # Game move
+      - log_type: "m"
+        table: "okinoko_iarv2_move_events"
+        schema:
+          id: numeric
+          by: string
+          cell: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          by: "2"
+          cell: "3"
+
+      # Game won
+      - log_type: "w"
+        table: "okinoko_iarv2_won_events"
+        schema:
+          id: numeric
+          winner: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          winner: "2"
+
+      # Game resigned
+      - log_type: "r"
+        table: "okinoko_iarv2_resign_events"
+        schema:
+          id: numeric
+          resigner: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          resigner: "2"
+
+      # Game timeout
+      - log_type: "t"
+        table: "okinoko_iarv2_timeout_events"
+        schema:
+          id: numeric
+          timedout: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          timedout: "2"
+
+      # Game draw
+      - log_type: "d"
+        table: "okinoko_iarv2_draw_events"
+        schema:
+          id: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+
+      # Game swap
+      - log_type: "s"
+        table: "okinoko_iarv2_swap_events"
+        schema:
+          id: numeric
+          by: string
+          operation: string
+          cell: numeric
+          color: numeric
+          choice: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          id: "1"
+          by: "2"
+          operation: "3"
+          cell: "4"
+          color: "5"
+          choice: "6"

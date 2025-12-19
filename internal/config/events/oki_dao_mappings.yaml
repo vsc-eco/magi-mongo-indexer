@@ -1,0 +1,251 @@
+# ===============================
+# MAPPINGS CONFIGURATION
+# ===============================
+#
+# This file defines how contract events are mapped into Postgres tables.
+# Each contract has its own entry under `contracts:`, and each event
+# within that contract appears under its `events:` list.
+#
+# Structure:
+# contracts:
+#   - address: "<contract address>"
+#     fromBlockHeight: <optional number>
+#     events:
+#       - log_type: "<short type>"
+#         table: "<table_name>"
+#         schema: { column: type }
+#         parse: "json" | "csv"
+#         delimiter: "|"            # only for CSV
+#         key_delimiter: "="        # only for CSV
+#         fields: { column: selector }
+#
+# ===============================
+
+contracts:
+  - address: "vsc1Ba9AyyUcMnYVoDVsjoJztnPFHNxQwWBPsb"   # Okinoko DAO contract
+    fromBlockHeight: 5000
+    events:
+      # Project created
+      - log_type: "dc"
+        table: "okinoko_dao_project_created_events"
+        schema:
+          project_id: numeric
+          created_by: string
+          name: string
+          description: string
+          metadata: string
+          url: string
+          funds_asset: string
+          voting_system: string
+          threshold_percent: numeric
+          quorum_percent: numeric
+          proposal_duration_hours: numeric
+          execution_delay_hours: numeric
+          leave_cooldown_hours: numeric
+          proposal_cost: numeric
+          stake_min_amount: numeric
+          membership_contract: string
+          membership_function: string
+          membership_nft: string
+          membership_payload: string
+          proposals_members_only: boolean
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          created_by: "2"
+          name: "3"
+          description: "4"
+          metadata: "5"
+          url: "6"
+          funds_asset: "7"
+          voting_system: "8"
+          threshold_percent: "9"
+          quorum_percent: "10"
+          proposal_duration_hours: "11"
+          execution_delay_hours: "12"
+          leave_cooldown_hours: "13"
+          proposal_cost: "14"
+          stake_min_amount: "15"
+          membership_contract: "16"
+          membership_function: "17"
+          membership_nft: "18"
+          membership_payload: "19"
+          proposals_members_only: "20"
+
+      # Member joined
+      - log_type: "mj"
+        table: "okinoko_dao_member_joined_events"
+        schema:
+          project_id: numeric
+          member: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          member: "2"
+
+      # Member left
+      - log_type: "ml"
+        table: "okinoko_dao_member_left_events"
+        schema:
+          project_id: numeric
+          member: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          member: "2"
+
+      # Funds added
+      - log_type: "af"
+        table: "okinoko_dao_funds_added_events"
+        schema:
+          project_id: numeric
+          added_by: string
+          amount: numeric
+          asset: string
+          to_stake: boolean
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          added_by: "2"
+          amount: "3"
+          asset: "4"
+          to_stake: "5"
+
+      # Funds removed (payout / unstake)
+      - log_type: "rf"
+        table: "okinoko_dao_funds_removed_events"
+        schema:
+          project_id: numeric
+          to_address: string
+          amount: numeric
+          asset: string
+          from_stake: boolean
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          to_address: "2"
+          amount: "3"
+          asset: "4"
+          from_stake: "5"
+
+      # Proposal created
+      - log_type: "pc"
+        table: "okinoko_dao_proposal_created_events"
+        schema:
+          proposal_id: numeric
+          project_id: numeric
+          created_by: string
+          name: string
+          description: string
+          metadata: string
+          duration_hours: numeric
+          is_poll: boolean
+          options: string
+          payouts: string
+          outcome_meta: string
+          url: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          proposal_id: "1"
+          project_id: "2"
+          created_by: "3"
+          name: "4"
+          description: "5"
+          metadata: "6"
+          url: "7"
+          duration_hours: "8"
+          is_poll: "9"
+          options: "10"
+          payouts: "11"
+          outcome_meta: "12"
+
+      # Proposal state changed
+      - log_type: "ps"
+        table: "okinoko_dao_proposal_state_events"
+        schema:
+          proposal_id: numeric
+          state: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          proposal_id: "1"
+          state: "2"
+
+      # Proposal execution ready
+      - log_type: "px"
+        table: "okinoko_dao_proposal_ready_events"
+        schema:
+          project_id: numeric
+          proposal_id: numeric
+          ready_at: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          proposal_id: "2"
+          ready_at: "3"
+
+      # Proposal execution result
+      - log_type: "pr"
+        table: "okinoko_dao_proposal_result_events"
+        schema:
+          project_id: numeric
+          proposal_id: numeric
+          result: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          proposal_id: "2"
+          result: "3"
+
+      # Proposal metadata/config diff
+      - log_type: "pm"
+        table: "okinoko_dao_proposal_meta_events"
+        schema:
+          project_id: numeric
+          proposal_id: numeric
+          field: string
+          old_value: string
+          new_value: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          project_id: "1"
+          proposal_id: "2"
+          field: "3"
+          old_value: "4"
+          new_value: "5"
+
+      # Vote casted / updated
+      - log_type: "v"
+        table: "okinoko_dao_vote_events"
+        schema:
+          proposal_id: numeric
+          voter: string
+          choices: string
+          weight: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          proposal_id: "1"
+          voter: "2"
+          choices: "3"
+          weight: "4"
