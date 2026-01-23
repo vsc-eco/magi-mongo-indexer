@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -16,6 +18,45 @@ import (
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/hasura"
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/mapper"
 )
+
+// healthStatus represents the response from the health check endpoint
+type healthStatus struct {
+	Status   string `json:"status"`
+	Postgres bool   `json:"postgres"`
+	Mappings bool   `json:"mappings"`
+}
+
+// healthHandler handles health check requests
+type healthHandler struct {
+	db *sql.DB
+}
+
+func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	status := healthStatus{
+		Status:   "healthy",
+		Postgres: false,
+		Mappings: false,
+	}
+
+	// Check Postgres connection
+	if err := h.db.Ping(); err == nil {
+		status.Postgres = true
+	}
+
+	// Check mappings loaded
+	if mapper.GetMappings() != nil {
+		status.Mappings = true
+	}
+
+	// Set overall status
+	if !status.Postgres || !status.Mappings {
+		status.Status = "unhealthy"
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
 
 func main() {
 	cfg := config.LoadConfig()
@@ -93,6 +134,22 @@ func main() {
 				continue
 			}
 			backoff = time.Second * 5
+		}
+	}()
+
+	// --- Health check HTTP server ---
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/health", &healthHandler{db: db})
+
+		port := os.Getenv("HEALTH_PORT")
+		if port == "" {
+			port = "8080"
+		}
+
+		log.Printf("[health] starting health check server on :%s", port)
+		if err := http.ListenAndServe(":"+port, mux); err != nil {
+			log.Printf("[health] server error: %v", err)
 		}
 	}()
 

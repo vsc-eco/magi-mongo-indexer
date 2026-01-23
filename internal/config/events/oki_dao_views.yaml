@@ -941,7 +941,8 @@ views:
         pc.created_by,
         pc.name,
         pc.indexer_block_height,
-        ml.member AS member
+        ml.member AS member,
+        pc.indexer_tx_hash
       FROM okinoko_dao_proposal_created_events pc
       LEFT JOIN okinoko_dao_membership_latest ml
         ON ml.project_id = pc.project_id
@@ -956,7 +957,8 @@ views:
         pr.proposal_id,
         pr.result,
         pr.indexer_block_height,
-        ml.member AS member
+        ml.member AS member,
+        pr.indexer_tx_hash
       FROM okinoko_dao_proposal_result_events pr
       LEFT JOIN okinoko_dao_membership_latest ml
         ON ml.project_id = pr.project_id

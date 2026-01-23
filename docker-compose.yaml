@@ -12,6 +12,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
+      - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
       # Mount init scripts for creating extra roles (e.g., gql_reader)
     healthcheck:
@@ -77,3 +78,6 @@ networks:
   go-vsc-node:
     external: true
     name: vsc-deployment_go-vsc-node 
+
+volumes:
+  postgres_data:

@@ -896,9 +896,10 @@ views:
         LEFT JOIN swap_state ss ON r.id = ss.id
       ),
       last_move AS (
-        SELECT 
+        SELECT
           id,
           by AS last_move_by,
+          indexer_ts,
           ROW_NUMBER() OVER (PARTITION BY id ORDER BY indexer_block_height DESC) AS rn
         FROM okinoko_iarv2_move_events
       ),
@@ -954,7 +955,8 @@ views:
           WHEN e.swap_last_choice = 'add' AND e.swap_add_count < 2 THEN 's_2'  -- joiner placing extra stones
           WHEN e.swap_last_choice = 'add' AND e.swap_add_count >= 2 THEN 's_3' -- creator chooses color
           ELSE 'm'
-        END AS movetype
+        END AS movetype,
+        m.indexer_ts
       FROM effective_roles e
       LEFT JOIN last_move m ON e.id = m.id AND m.rn = 1
       WHERE e.id IN (SELECT id FROM active)
@@ -971,7 +973,8 @@ views:
         j.indexer_block_height,
         j.indexer_ts,
         c.by AS game_creator,
-        c.name AS game_name
+        c.name AS game_name,
+        j.indexer_tx_hash
       FROM okinoko_iarv2_joined_events j
       LEFT JOIN okinoko_iarv2_created_events c ON c.id = j.id;
 
@@ -985,6 +988,7 @@ views:
         m.cell,
         m.indexer_block_height,
         m.indexer_ts,
-        a.next_turn_player
+        a.next_turn_player,
+        m.indexer_tx_hash
       FROM okinoko_iarv2_move_events m
       LEFT JOIN okinoko_iarv2_active_with_turn a ON a.id = m.id;

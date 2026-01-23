@@ -9,6 +9,27 @@ import (
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/types"
 )
 
+// getNestedValue traverses a map using a dot-separated path and returns the value
+// at that path, or nil if not found. Supports arbitrary nesting depth.
+// Example: getNestedValue(data, "user.profile.email") returns data["user"]["profile"]["email"]
+func getNestedValue(data map[string]interface{}, path string) interface{} {
+	parts := strings.Split(path, ".")
+	var current interface{} = data
+
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			current = v[part]
+			if current == nil {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+	return current
+}
+
 // ParseLog extracts values from a log string based on the given mapping rules.
 // It supports two parsing strategies depending on mapping.Parse ("json" or "csv").
 // Returns a map where keys are column names defined in the mapping, and values
@@ -24,17 +45,8 @@ func ParseLog(mapping types.EventMapping, logStr string) map[string]interface{} 
 		if err := json.Unmarshal([]byte(logStr), &raw); err == nil {
 			for col, path := range mapping.Fields {
 				key := strings.TrimPrefix(path, "$.")
-				if strings.Contains(key, ".") {
-					parts := strings.SplitN(key, ".", 2)
-					if nested, ok := raw[parts[0]].(map[string]interface{}); ok {
-						if v, ok := nested[parts[1]]; ok {
-							out[col] = v
-						}
-					}
-				} else {
-					if v, ok := raw[key]; ok {
-						out[col] = v
-					}
+				if v := getNestedValue(raw, key); v != nil {
+					out[col] = v
 				}
 			}
 		}
