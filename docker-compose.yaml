@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: indexerpass
       POSTGRES_DB: indexerdb
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
@@ -28,7 +28,7 @@ services:
     image: hasura/graphql-engine:v2.42.0
     restart: always
     ports:
-      - "8081:8080"                   # UI/API exposed on localhost:8081
+      - "${HASURA_PORT:-8081}:8080"   # UI/API exposed on localhost
     environment:
       # Hasura internal metadata DB (full rights)
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
@@ -53,6 +53,8 @@ services:
   magi-mongo-indexer:
     build: .                          # Build local Dockerfile
     restart: always
+    ports:
+      - "${HEALTH_PORT:-8080}:8080"   # Health check endpoint
     environment:
       DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb?sslmode=disable
       MONGO_URI: mongodb://mongo_vsc:27017

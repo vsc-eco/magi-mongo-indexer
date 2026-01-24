@@ -25,10 +25,32 @@ docker compose up -d
 
 Services:
 
-* **Postgres** → `localhost:5432`
-* **Hasura GraphQL** → `http://localhost:8081/hasura/console` (admin secret stored in `.env`)
+* **Postgres** → `localhost:5432` (configurable via `POSTGRES_PORT`)
+* **Hasura GraphQL** → `http://localhost:8081/hasura/console` (configurable via `HASURA_PORT`)
 * **Indexer** (Go ingestor) → polls MongoDB contract_state collection and writes logs into Postgres
-* **Health Check** → `http://localhost:8080/health` (configurable via `HEALTH_PORT` env var)
+* **Health Check** → `http://localhost:8080/health` (configurable via `HEALTH_PORT`)
+
+### Running Multiple Instances
+
+To run multiple indexers on the same system, copy the entire folder and customize the ports in `.env`:
+
+```bash
+# Instance 1 (.env)
+POSTGRES_PORT=5432
+HASURA_PORT=8081
+HEALTH_PORT=8080
+
+# Instance 2 (.env)
+POSTGRES_PORT=5433
+HASURA_PORT=8082
+HEALTH_PORT=8083
+```
+
+Each instance needs its own Postgres volume, so also update the volume name in `docker-compose.yaml` or use separate project names:
+
+```bash
+docker compose -p indexer-instance2 up -d
+```
 
 ### Health Check Endpoint
 
