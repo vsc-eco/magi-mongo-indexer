@@ -39,8 +39,6 @@ docker compose up -d
 # Read port from .env (default 8081)
 HASURA_PORT=$(grep -E "^HASURA_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "8081")
 HASURA_PORT=${HASURA_PORT:-8081}
-HEALTH_PORT=$(grep -E "^HEALTH_PORT=" "$ENV_FILE" | cut -d'=' -f2 || echo "8080")
-HEALTH_PORT=${HEALTH_PORT:-8080}
 
 echo "[init] Waiting for Hasura to start on port $HASURA_PORT..."
 TRIES=0
@@ -54,5 +52,5 @@ until curl -s "http://localhost:${HASURA_PORT}/healthz" >/dev/null; do
 done
 
 echo "[init] ✅ Hasura is running at http://localhost:${HASURA_PORT}/console"
-echo "[init] ✅ Health check at http://localhost:${HEALTH_PORT}/health"
+echo "[init] ✅ Health check via GraphQL: query { indexer_health { latest_block_height } }"
 echo "[init] Admin secret stored in .env"

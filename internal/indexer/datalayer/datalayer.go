@@ -254,3 +254,22 @@ func InsertLog(db *sql.DB, mapping types.EventMapping, ev types.LogEvent) {
 func pqQuoteIdent(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
+
+// EnsureHealthView creates the indexer_health view for monitoring via Hasura.
+// This view provides the latest block height and last update time from contract_logs.
+func EnsureHealthView(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE OR REPLACE VIEW indexer_health AS
+		SELECT
+			COALESCE(MAX(block_height), 0) AS latest_block_height,
+			COALESCE(MAX(ts), NOW()) AS last_update,
+			COUNT(DISTINCT contract_address) AS tracked_contracts,
+			COUNT(*) AS total_logs
+		FROM contract_logs
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create indexer_health view: %w", err)
+	}
+	log.Println("[health] created/updated indexer_health view")
+	return nil
+}

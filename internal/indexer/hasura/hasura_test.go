@@ -57,8 +57,8 @@ func TestGetDesiredAndTracked_DesiredTables(t *testing.T) {
 		t.Errorf("expected %d desired tables, got %d", len(expectedTables), len(desiredTables))
 	}
 
-	// Check desired views
-	expectedViews := []string{"view_a", "view_b"}
+	// Check desired views (includes built-in indexer_health view)
+	expectedViews := []string{"view_a", "view_b", "indexer_health"}
 	for _, view := range expectedViews {
 		if _, ok := desiredViews[view]; !ok {
 			t.Errorf("expected view %q in desiredViews", view)
@@ -106,8 +106,12 @@ func TestGetDesiredAndTracked_EmptyMappings(t *testing.T) {
 		t.Errorf("expected exactly 1 desired table (contract_logs), got %d", len(desiredTables))
 	}
 
-	if len(desiredViews) != 0 {
-		t.Errorf("expected 0 desired views, got %d", len(desiredViews))
+	// Should still have the built-in indexer_health view
+	if len(desiredViews) != 1 {
+		t.Errorf("expected 1 desired view (indexer_health), got %d", len(desiredViews))
+	}
+	if _, ok := desiredViews["indexer_health"]; !ok {
+		t.Error("expected indexer_health view in desiredViews")
 	}
 }
 
@@ -224,8 +228,8 @@ func TestGetDesiredAndTracked_OnlyViews(t *testing.T) {
 		t.Errorf("expected 1 table (contract_logs), got %d", len(desiredTables))
 	}
 
-	// Should have 3 views
-	if len(desiredViews) != 3 {
-		t.Errorf("expected 3 views, got %d", len(desiredViews))
+	// Should have 3 views + indexer_health = 4
+	if len(desiredViews) != 4 {
+		t.Errorf("expected 4 views (3 + indexer_health), got %d", len(desiredViews))
 	}
 }

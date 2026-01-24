@@ -232,6 +232,9 @@ func GetDesiredAndTracked(mappings *types.MappingFile, views *types.ViewsFile, c
 		desiredViews[v.Name] = struct{}{}
 	}
 
+	// Always include the built-in health view
+	desiredViews["indexer_health"] = struct{}{}
+
 	hasuraURL := cfg.HasuraURL
 	adminSecret := cfg.HasuraSecret
 	if hasuraURL == "" || adminSecret == "" {

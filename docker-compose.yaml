@@ -53,8 +53,6 @@ services:
   magi-mongo-indexer:
     build: .                          # Build local Dockerfile
     restart: always
-    ports:
-      - "${HEALTH_PORT:-8080}:8080"   # Health check endpoint
     environment:
       DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb?sslmode=disable
       MONGO_URI: mongodb://mongo_vsc:27017
