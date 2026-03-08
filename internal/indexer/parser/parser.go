@@ -46,7 +46,21 @@ func ParseLog(mapping types.EventMapping, logStr string) map[string]interface{} 
 			for col, path := range mapping.Fields {
 				key := strings.TrimPrefix(path, "$.")
 				if v := getNestedValue(raw, key); v != nil {
-					out[col] = v
+					// If the value is a slice or map but the target column is a
+					// string (TEXT), serialize it back to JSON so the database
+					// driver can store it as a plain string.
+					switch v.(type) {
+					case []interface{}, map[string]interface{}:
+						if mapping.Schema[col] == "string" || mapping.Schema[col] == "" {
+							if b, err := json.Marshal(v); err == nil {
+								out[col] = string(b)
+							}
+						} else {
+							out[col] = v
+						}
+					default:
+						out[col] = v
+					}
 				}
 			}
 		}

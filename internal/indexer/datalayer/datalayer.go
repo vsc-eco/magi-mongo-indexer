@@ -46,6 +46,7 @@ func EnsureTables(db *sql.DB, mappings *types.MappingFile) error {
 				"indexer_tx_hash TEXT",
 				"indexer_ts TIMESTAMP",
 				"indexer_log_hash TEXT",
+				"indexer_contract_id TEXT",
 			}
 
 			// Add user-defined schema columns
@@ -92,6 +93,10 @@ func EnsureTables(db *sql.DB, mappings *types.MappingFile) error {
 				return err
 			}
 
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS indexer_contract_id TEXT`, pqQuoteIdent(m.Table))); err != nil {
+				return err
+			}
+
 			idxName := fmt.Sprintf("%s_log_hash_idx", sanitizeIdent(m.Table))
 			if _, err := db.Exec(fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (indexer_log_hash)`, pqQuoteIdent(idxName), pqQuoteIdent(m.Table))); err != nil {
 				return err
@@ -124,7 +129,7 @@ func EnsureViews(db *sql.DB, views *types.ViewsFile) error {
 // Skips contract_logs and any table starting with cst_.
 func PruneTables(db *sql.DB, mappings *types.MappingFile) error {
 	// Collect desired tables
-	desired := map[string]struct{}{"contract_logs": {}}
+	desired := map[string]struct{}{"contract_logs": {}, "discovered_contracts": {}}
 	for _, contract := range mappings.Contracts {
 		for _, m := range contract.Events {
 			desired[m.Table] = struct{}{}
@@ -217,10 +222,10 @@ func BuildInsertSQL(mapping types.EventMapping, ev types.LogEvent) (string, []in
 	hashBytes := sha256.Sum256([]byte(hashInput))
 	logHash := hex.EncodeToString(hashBytes[:])
 
-	cols := []string{"indexer_block_height", "indexer_tx_hash", "indexer_ts", "indexer_log_hash"}
-	vals := []interface{}{ev.BlockHeight, ev.TxHash, ev.Timestamp, logHash}
-	placeholders := []string{"$1", "$2", "$3", "$4"}
-	i := 5
+	cols := []string{"indexer_block_height", "indexer_tx_hash", "indexer_ts", "indexer_log_hash", "indexer_contract_id"}
+	vals := []interface{}{ev.BlockHeight, ev.TxHash, ev.Timestamp, logHash, ev.ContractAddress}
+	placeholders := []string{"$1", "$2", "$3", "$4", "$5"}
+	i := 6
 
 	// Add dynamic columns extracted from the log
 	for col, val := range parsed {

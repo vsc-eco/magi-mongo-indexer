@@ -1,0 +1,152 @@
+# ===============================
+# MAGI NFT - AUTO-DISCOVERED MAPPINGS (ERC-1155)
+# ===============================
+#
+# This mapping uses discoverEvent instead of a static address.
+# The indexer scans ALL contract logs for the "init_magi_nft" event.
+# When found, that contract is automatically registered and all its
+# events (transfers, approvals, etc.) are indexed from that point on.
+#
+# Because many NFT contracts share the same tables, each row includes
+# an indexer_contract_id column to distinguish which contract emitted it.
+# ===============================
+
+contracts:
+  - discoverEvent: "init_magi_nft"
+    events:
+      # NFT Initialization
+      - log_type: "init_magi_nft"
+        table: "magi_nft_init_events"
+        schema:
+          owner: string
+          name: string
+          symbol: string
+          base_uri: string
+        parse: "json"
+        fields:
+          owner: "$.attributes.owner"
+          name: "$.attributes.name"
+          symbol: "$.attributes.symbol"
+          base_uri: "$.attributes.baseUri"
+
+      # ERC-1155 TransferSingle (includes mint/burn)
+      - log_type: "TransferSingle"
+        table: "magi_nft_transfer_single_events"
+        schema:
+          operator: string
+          from: string
+          to: string
+          token_id: string
+          value: numeric
+        parse: "json"
+        fields:
+          operator: "$.attributes.operator"
+          from: "$.attributes.from"
+          to: "$.attributes.to"
+          token_id: "$.attributes.id"
+          value: "$.attributes.value"
+
+      # ERC-1155 TransferBatch (includes batch mint/burn)
+      - log_type: "TransferBatch"
+        table: "magi_nft_transfer_batch_events"
+        schema:
+          operator: string
+          from: string
+          to: string
+          ids: string
+          values: string
+        parse: "json"
+        fields:
+          operator: "$.attributes.operator"
+          from: "$.attributes.from"
+          to: "$.attributes.to"
+          ids: "$.attributes.ids"
+          values: "$.attributes.values"
+
+      # ERC-1155 ApprovalForAll
+      - log_type: "ApprovalForAll"
+        table: "magi_nft_approval_events"
+        schema:
+          account: string
+          operator: string
+          approved: string
+        parse: "json"
+        fields:
+          account: "$.attributes.account"
+          operator: "$.attributes.operator"
+          approved: "$.attributes.approved"
+
+      # URI Change
+      - log_type: "URI"
+        table: "magi_nft_uri_events"
+        schema:
+          value: string
+          token_id: string
+        parse: "json"
+        fields:
+          value: "$.attributes.value"
+          token_id: "$.attributes.id"
+
+      # Base URI Change
+      - log_type: "baseUriChange"
+        table: "magi_nft_base_uri_events"
+        schema:
+          previous_uri: string
+          new_uri: string
+        parse: "json"
+        fields:
+          previous_uri: "$.attributes.previousUri"
+          new_uri: "$.attributes.newUri"
+
+      # Owner Change Events
+      - log_type: "ownerChange"
+        table: "magi_nft_owner_change_events"
+        schema:
+          previous_owner: string
+          new_owner: string
+        parse: "json"
+        fields:
+          previous_owner: "$.attributes.previousOwner"
+          new_owner: "$.attributes.newOwner"
+
+      # Paused Events
+      - log_type: "paused"
+        table: "magi_nft_paused_events"
+        schema:
+          by: string
+        parse: "json"
+        fields:
+          by: "$.attributes.by"
+
+      # Unpaused Events
+      - log_type: "unpaused"
+        table: "magi_nft_unpaused_events"
+        schema:
+          by: string
+        parse: "json"
+        fields:
+          by: "$.attributes.by"
+
+      # Token Created (emitted on first mint of each token ID)
+      - log_type: "tokenCreated"
+        table: "magi_nft_token_created_events"
+        schema:
+          token_id: string
+          max_supply: numeric
+          soulbound: string
+        parse: "json"
+        fields:
+          token_id: "$.attributes.tokenId"
+          max_supply: "$.attributes.maxSupply"
+          soulbound: "$.attributes.soulbound"
+
+      # Template Mint (batch mint with propertiesTemplate)
+      - log_type: "templateMint"
+        table: "magi_nft_template_mint_events"
+        schema:
+          template_id: string
+          copy_ids: string
+        parse: "json"
+        fields:
+          template_id: "$.attributes.templateId"
+          copy_ids: "$.attributes.copyIds"

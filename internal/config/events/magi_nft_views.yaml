@@ -1,0 +1,191 @@
+# ================================
+# MAGI NFT - Database Views (ERC-1155)
+# ================================
+# Aggregation views that compute current NFT state from indexed events.
+# These are exposed via Hasura for the frontend to query.
+
+views:
+
+  # NFT registry — one row per discovered NFT contract
+  - name: magi_nft_registry
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_registry AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        name,
+        symbol,
+        base_uri,
+        owner,
+        indexer_block_height AS init_block,
+        indexer_ts AS init_ts
+      FROM magi_nft_init_events;
+
+  # Unified transfer view — combines TransferSingle rows with unnested TransferBatch rows
+  - name: magi_nft_all_transfers
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_all_transfers AS
+      SELECT
+        indexer_contract_id,
+        operator,
+        "from",
+        "to",
+        token_id,
+        value,
+        indexer_block_height,
+        indexer_ts
+      FROM magi_nft_transfer_single_events
+      UNION ALL
+      SELECT
+        b.indexer_contract_id,
+        b.operator,
+        b."from",
+        b."to",
+        id_elem.val AS token_id,
+        (val_elem.val)::numeric AS value,
+        b.indexer_block_height,
+        b.indexer_ts
+      FROM magi_nft_transfer_batch_events b,
+        LATERAL jsonb_array_elements_text(b.ids::jsonb) WITH ORDINALITY AS id_elem(val, ord),
+        LATERAL jsonb_array_elements_text(b."values"::jsonb) WITH ORDINALITY AS val_elem(val, ord)
+      WHERE id_elem.ord = val_elem.ord;
+
+  # Template relationships — maps each token to its template (if any)
+  - name: magi_nft_template_tokens
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_template_tokens AS
+      SELECT
+        t.indexer_contract_id AS contract_id,
+        t.template_id,
+        copy_id.val AS token_id,
+        t.indexer_block_height,
+        t.indexer_ts
+      FROM magi_nft_template_mint_events t,
+        LATERAL jsonb_array_elements_text(t.copy_ids::jsonb) AS copy_id(val)
+      UNION ALL
+      SELECT
+        indexer_contract_id AS contract_id,
+        template_id,
+        template_id AS token_id,
+        indexer_block_height,
+        indexer_ts
+      FROM magi_nft_template_mint_events;
+
+  # Token info — max supply, soulbound status from tokenCreated events
+  - name: magi_nft_token_info
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_token_info AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        token_id,
+        max_supply::bigint AS max_supply,
+        (soulbound = 'true') AS soulbound,
+        indexer_block_height,
+        indexer_ts AS created_ts
+      FROM magi_nft_token_created_events;
+
+  # Current NFT balances per (contract, account, token_id)
+  # Computed from all transfer events (from='' is mint, to='' is burn)
+  - name: magi_nft_balances
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_balances AS
+      WITH incoming AS (
+        SELECT
+          indexer_contract_id AS contract_id,
+          "to" AS account,
+          token_id,
+          SUM(value) AS total_in
+        FROM magi_nft_all_transfers
+        WHERE "to" != ''
+        GROUP BY indexer_contract_id, "to", token_id
+      ),
+      outgoing AS (
+        SELECT
+          indexer_contract_id AS contract_id,
+          "from" AS account,
+          token_id,
+          SUM(value) AS total_out
+        FROM magi_nft_all_transfers
+        WHERE "from" != ''
+        GROUP BY indexer_contract_id, "from", token_id
+      )
+      SELECT
+        COALESCE(i.contract_id, o.contract_id) AS contract_id,
+        COALESCE(i.account, o.account) AS account,
+        COALESCE(i.token_id, o.token_id) AS token_id,
+        COALESCE(i.total_in, 0) - COALESCE(o.total_out, 0) AS balance
+      FROM incoming i
+      FULL OUTER JOIN outgoing o
+        ON i.contract_id = o.contract_id AND i.account = o.account AND i.token_id = o.token_id
+      WHERE COALESCE(i.total_in, 0) - COALESCE(o.total_out, 0) > 0;
+
+  # Current supply per token_id — total minted minus total burned
+  - name: magi_nft_token_supply
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_token_supply AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        token_id,
+        SUM(CASE WHEN "from" = '' THEN value ELSE 0 END) -
+        SUM(CASE WHEN "to" = '' THEN value ELSE 0 END) AS current_supply,
+        SUM(CASE WHEN "from" = '' THEN value ELSE 0 END) AS total_minted
+      FROM magi_nft_all_transfers
+      GROUP BY indexer_contract_id, token_id;
+
+  # Unique token count per contract (number of distinct token IDs minted)
+  - name: magi_nft_token_count
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_token_count AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        COUNT(DISTINCT token_id) AS token_count,
+        SUM(CASE WHEN "from" = '' THEN value ELSE 0 END) AS total_minted,
+        SUM(CASE WHEN "to" = '' THEN value ELSE 0 END) AS total_burned
+      FROM magi_nft_all_transfers
+      GROUP BY indexer_contract_id;
+
+  # Latest owner per NFT contract — tracks ownership changes
+  - name: magi_nft_current_owner
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_current_owner AS
+      SELECT DISTINCT ON (indexer_contract_id)
+        indexer_contract_id AS contract_id,
+        new_owner AS owner
+      FROM magi_nft_owner_change_events
+      ORDER BY indexer_contract_id, indexer_block_height DESC;
+
+  # Current paused state per NFT contract
+  - name: magi_nft_current_paused
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_current_paused AS
+      SELECT DISTINCT ON (contract_id)
+        contract_id,
+        (action = 'paused') AS paused
+      FROM (
+        SELECT indexer_contract_id AS contract_id, indexer_block_height, 'paused' AS action
+        FROM magi_nft_paused_events
+        UNION ALL
+        SELECT indexer_contract_id AS contract_id, indexer_block_height, 'unpaused' AS action
+        FROM magi_nft_unpaused_events
+      ) combined
+      ORDER BY contract_id, indexer_block_height DESC;
+
+  # Combined NFT contract overview
+  - name: magi_nft_overview
+    sql: |
+      CREATE OR REPLACE VIEW magi_nft_overview AS
+      SELECT
+        r.contract_id,
+        r.name,
+        r.symbol,
+        r.base_uri,
+        COALESCE(co.owner, r.owner) AS owner,
+        r.init_block,
+        r.init_ts,
+        COALESCE(tc.token_count, 0) AS token_count,
+        COALESCE(tc.total_minted, 0) AS total_minted,
+        COALESCE(tc.total_burned, 0) AS total_burned,
+        COALESCE(p.paused, FALSE) AS paused
+      FROM magi_nft_registry r
+      LEFT JOIN magi_nft_token_count tc ON r.contract_id = tc.contract_id
+      LEFT JOIN magi_nft_current_owner co ON r.contract_id = co.contract_id
+      LEFT JOIN magi_nft_current_paused p ON r.contract_id = p.contract_id;
