@@ -15,8 +15,12 @@ type MappingFile struct {
 }
 
 // ContractMapping defines all event mappings for a specific contract.
+// If DiscoverEvent is set (and Address is empty), the indexer auto-discovers
+// contracts by scanning ALL contract logs for the given event type.
+// Discovered contracts are persisted and indexed using the same event mappings.
 type ContractMapping struct {
 	Address         string         `yaml:"address"`
+	DiscoverEvent   string         `yaml:"discoverEvent,omitempty"`
 	FromBlockHeight *uint64        `yaml:"fromBlockHeight,omitempty"`
 	Events          []EventMapping `yaml:"events"`
 }

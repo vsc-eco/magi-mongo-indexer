@@ -217,8 +217,9 @@ func GetDesiredAndTracked(mappings *types.MappingFile, views *types.ViewsFile, c
 	desiredTables = make(map[string]struct{})
 	desiredViews = make(map[string]struct{})
 
-	// Always include generic log table
+	// Always include generic log table and discovery table
 	desiredTables["contract_logs"] = struct{}{}
+	desiredTables["discovered_contracts"] = struct{}{}
 
 	// nested loop for the new mappings structure
 	for _, contract := range mappings.Contracts {

@@ -1,0 +1,87 @@
+# ===============================
+# MAGI TOKEN - AUTO-DISCOVERED MAPPINGS
+# ===============================
+#
+# This mapping uses discoverEvent instead of a static address.
+# The indexer scans ALL contract logs for the "init_magi_token" event.
+# When found, that contract is automatically registered and all its
+# events (transfers, approvals, etc.) are indexed from that point on.
+#
+# Because many token contracts share the same tables, each row includes
+# an indexer_contract_id column to distinguish which contract emitted it.
+# ===============================
+
+contracts:
+  - discoverEvent: "init_magi_token"
+    events:
+      # Token Initialization
+      - log_type: "init_magi_token"
+        table: "magi_token_init_events"
+        schema:
+          owner: string
+          name: string
+          symbol: string
+          decimals: numeric
+          max_supply: numeric
+        parse: "json"
+        fields:
+          owner: "$.attributes.owner"
+          name: "$.attributes.name"
+          symbol: "$.attributes.symbol"
+          decimals: "$.attributes.decimals"
+          max_supply: "$.attributes.maxSupply"
+
+      # Token Transfers (includes mint/burn)
+      - log_type: "transfer"
+        table: "magi_token_transfer_events"
+        schema:
+          from: string
+          to: string
+          amount: numeric
+        parse: "json"
+        fields:
+          from: "$.attributes.from"
+          to: "$.attributes.to"
+          amount: "$.attributes.amount"
+
+      # Approval Events
+      - log_type: "approval"
+        table: "magi_token_approval_events"
+        schema:
+          owner: string
+          spender: string
+          amount: numeric
+        parse: "json"
+        fields:
+          owner: "$.attributes.owner"
+          spender: "$.attributes.spender"
+          amount: "$.attributes.amount"
+
+      # Owner Change Events
+      - log_type: "ownerChange"
+        table: "magi_token_owner_change_events"
+        schema:
+          previous_owner: string
+          new_owner: string
+        parse: "json"
+        fields:
+          previous_owner: "$.attributes.previousOwner"
+          new_owner: "$.attributes.newOwner"
+
+      # Paused Events
+      - log_type: "paused"
+        table: "magi_token_paused_events"
+        schema:
+          by: string
+        parse: "json"
+        fields:
+          by: "$.attributes.by"
+
+      # Unpaused Events
+      - log_type: "unpaused"
+        table: "magi_token_unpaused_events"
+        schema:
+          by: string
+        parse: "json"
+        fields:
+          by: "$.attributes.by"

@@ -1,3 +1,5 @@
+name: magi-mongo-indexer-testnet
+
 services:
   # ================================
   # PostgreSQL database
@@ -10,9 +12,9 @@ services:
       POSTGRES_PASSWORD: indexerpass
       POSTGRES_DB: indexerdb
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_testnet:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
       # Mount init scripts for creating extra roles (e.g., gql_reader)
     healthcheck:
@@ -28,7 +30,7 @@ services:
     image: hasura/graphql-engine:v2.42.0
     restart: always
     ports:
-      - "${HASURA_PORT:-8081}:8080"   # UI/API exposed on localhost
+      - "${HASURA_PORT:-8082}:8080"   # UI/API exposed on localhost
     environment:
       # Hasura internal metadata DB (full rights)
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
@@ -42,7 +44,7 @@ services:
 
       # public role
       HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
-      
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -55,7 +57,7 @@ services:
     restart: always
     environment:
       DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb?sslmode=disable
-      MONGO_URI: mongodb://mongo_vsc:27017
+      MONGO_URI: mongodb://mongo_vsc_testnet:27017
       MONGO_DB_NAME: go-vsc
       POLL_INTERVAL_SEC: 5
       HASURA_URL: http://hasura:8080
@@ -71,13 +73,13 @@ services:
       hasura:
         condition: service_healthy
     networks:
-      - go-vsc-node   # join go-vsc-node network for MongoDB access
-      - default       # still on its own default network for postgres/hasura
+      - go-vsc-node-testnet   # join go-vsc-node-testnet network for MongoDB access
+      - default               # still on its own default network for postgres/hasura
 
 networks:
-  go-vsc-node:
+  go-vsc-node-testnet:
     external: true
-    name: vsc-deployment_go-vsc-node 
+    name: vsc-deployment-testnet_go-vsc-node-testnet
 
 volumes:
-  postgres_data:
+  postgres_data_testnet:

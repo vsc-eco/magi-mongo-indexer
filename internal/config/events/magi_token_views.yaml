@@ -1,0 +1,124 @@
+# ================================
+# MAGI TOKEN - Database Views
+# ================================
+# Aggregation views that compute current token state from indexed events.
+# These are exposed via Hasura for the frontend to query.
+
+views:
+
+  # Token registry — one row per discovered token contract
+  - name: magi_token_registry
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_registry AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        name,
+        symbol,
+        decimals,
+        max_supply,
+        owner,
+        indexer_block_height AS init_block,
+        indexer_ts AS init_ts
+      FROM magi_token_init_events;
+
+  # Current balances — computed from transfer events
+  # Mints have from = '' (empty), burns have to = '' (empty)
+  - name: magi_token_balances
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_balances AS
+      WITH incoming AS (
+        SELECT
+          indexer_contract_id AS contract_id,
+          "to" AS account,
+          SUM(amount) AS total_in
+        FROM magi_token_transfer_events
+        WHERE "to" != ''
+        GROUP BY indexer_contract_id, "to"
+      ),
+      outgoing AS (
+        SELECT
+          indexer_contract_id AS contract_id,
+          "from" AS account,
+          SUM(amount) AS total_out
+        FROM magi_token_transfer_events
+        WHERE "from" != ''
+        GROUP BY indexer_contract_id, "from"
+      )
+      SELECT
+        COALESCE(i.contract_id, o.contract_id) AS contract_id,
+        COALESCE(i.account, o.account) AS account,
+        COALESCE(i.total_in, 0) - COALESCE(o.total_out, 0) AS balance
+      FROM incoming i
+      FULL OUTER JOIN outgoing o
+        ON i.contract_id = o.contract_id AND i.account = o.account
+      WHERE COALESCE(i.total_in, 0) - COALESCE(o.total_out, 0) > 0;
+
+  # Current supply per token — total minted minus total burned
+  - name: magi_token_supply
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_supply AS
+      SELECT
+        indexer_contract_id AS contract_id,
+        SUM(CASE WHEN "from" = '' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN "to" = '' THEN amount ELSE 0 END) AS current_supply
+      FROM magi_token_transfer_events
+      GROUP BY indexer_contract_id;
+
+  # Latest owner per token — tracks ownership changes
+  - name: magi_token_current_owner
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_current_owner AS
+      SELECT DISTINCT ON (indexer_contract_id)
+        indexer_contract_id AS contract_id,
+        new_owner AS owner
+      FROM magi_token_owner_change_events
+      ORDER BY indexer_contract_id, indexer_block_height DESC;
+
+  # Current paused state per token — derived from pause/unpause events
+  - name: magi_token_current_paused
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_current_paused AS
+      SELECT DISTINCT ON (contract_id)
+        contract_id,
+        (action = 'paused') AS paused
+      FROM (
+        SELECT indexer_contract_id AS contract_id, indexer_block_height, 'paused' AS action
+        FROM magi_token_paused_events
+        UNION ALL
+        SELECT indexer_contract_id AS contract_id, indexer_block_height, 'unpaused' AS action
+        FROM magi_token_unpaused_events
+      ) combined
+      ORDER BY contract_id, indexer_block_height DESC;
+
+  # Current allowances — latest approval event per (contract, owner, spender)
+  # The contract emits an approval event with the new total after every approve/increase/decrease/transferFrom
+  - name: magi_token_current_allowances
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_current_allowances AS
+      SELECT DISTINCT ON (indexer_contract_id, owner, spender)
+        indexer_contract_id AS contract_id,
+        owner,
+        spender,
+        amount AS allowance
+      FROM magi_token_approval_events
+      ORDER BY indexer_contract_id, owner, spender, indexer_block_height DESC;
+
+  # Combined token overview — registry + current supply + current owner + paused in one view
+  - name: magi_token_overview
+    sql: |
+      CREATE OR REPLACE VIEW magi_token_overview AS
+      SELECT
+        r.contract_id,
+        r.name,
+        r.symbol,
+        r.decimals,
+        r.max_supply,
+        COALESCE(co.owner, r.owner) AS owner,
+        r.init_block,
+        r.init_ts,
+        COALESCE(s.current_supply, 0) AS current_supply,
+        COALESCE(p.paused, FALSE) AS paused
+      FROM magi_token_registry r
+      LEFT JOIN magi_token_supply s ON r.contract_id = s.contract_id
+      LEFT JOIN magi_token_current_owner co ON r.contract_id = co.contract_id
+      LEFT JOIN magi_token_current_paused p ON r.contract_id = p.contract_id;

@@ -48,6 +48,15 @@ func main() {
 	if err := datalayer.EnsureHealthView(db); err != nil {
 		log.Fatal("❌ failed to ensure health view:", err)
 	}
+
+	// --- Initialize contract discovery ---
+	if err := mapper.EnsureDiscoveredContractsTable(db); err != nil {
+		log.Fatal("❌ failed to ensure discovered_contracts table:", err)
+	}
+	if err := mapper.LoadDiscoveredContracts(db); err != nil {
+		log.Fatal("❌ failed to load discovered contracts:", err)
+	}
+
 	if err := hasura.SyncHasuraTablesAndViews(mappings, views, cfg); err != nil {
 		log.Fatal("❌ failed to sync tables/views in Hasura:", err)
 	}

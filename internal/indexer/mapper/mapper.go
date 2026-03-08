@@ -51,6 +51,7 @@ func LoadMappings(path string) (*types.MappingFile, error) {
 
 // FindMapping finds the EventMapping for a given contract address and log string.
 // It supports both JSON ("type" field) and CSV (first token) log formats.
+// It checks static mappings first, then discovered contract templates.
 func FindMapping(addr string, logStr string) *types.EventMapping {
 	mappings := GetMappings()
 	if mappings == nil {
@@ -58,35 +59,55 @@ func FindMapping(addr string, logStr string) *types.EventMapping {
 	}
 
 	for _, c := range mappings.Contracts {
-		if c.Address != addr {
+		// Static mapping: match by exact address
+		// Template mapping: match if addr is a discovered contract for this template's DiscoverEvent
+		isMatch := false
+		if c.Address != "" && c.Address == addr {
+			isMatch = true
+		} else if c.DiscoverEvent != "" && c.Address == "" {
+			// Check if this addr was discovered via this template's event
+			if discoverEvent, ok := IsDiscoveredContract(addr); ok && discoverEvent == c.DiscoverEvent {
+				isMatch = true
+			}
+		}
+		if !isMatch {
 			continue
 		}
 
 		for _, m := range c.Events {
-			// JSON logs
-			if m.Parse == "json" && strings.HasPrefix(strings.TrimSpace(logStr), "{") {
-				var raw map[string]interface{}
-				if err := json.Unmarshal([]byte(logStr), &raw); err == nil {
-					if t, ok := raw["type"].(string); ok && t == m.LogType {
-						return &m
-					}
-				}
-			}
-
-			// CSV logs
-			if m.Parse == "csv" {
-				delim := m.Delimiter
-				if delim == "" {
-					delim = " "
-				}
-				parts := strings.Split(logStr, delim)
-				if len(parts) > 0 && strings.TrimSpace(parts[0]) == m.LogType {
-					return &m
-				}
+			if matchesLogType(m, logStr) {
+				return &m
 			}
 		}
 	}
 	return nil
+}
+
+// matchesLogType checks if a log string matches a mapping's log type.
+func matchesLogType(m types.EventMapping, logStr string) bool {
+	// JSON logs
+	if m.Parse == "json" && strings.HasPrefix(strings.TrimSpace(logStr), "{") {
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(logStr), &raw); err == nil {
+			if t, ok := raw["type"].(string); ok && t == m.LogType {
+				return true
+			}
+		}
+	}
+
+	// CSV logs
+	if m.Parse == "csv" {
+		delim := m.Delimiter
+		if delim == "" {
+			delim = " "
+		}
+		parts := strings.Split(logStr, delim)
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) == m.LogType {
+			return true
+		}
+	}
+
+	return false
 }
 
 // LoadViews merges all *_views.yaml files in the given directory

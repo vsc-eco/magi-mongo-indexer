@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -71,6 +72,9 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 	mappings := mapper.GetMappings()
 	if mappings != nil {
 		for _, contract := range mappings.Contracts {
+			if contract.Address == "" {
+				continue // skip templates (no static address)
+			}
 			lastBlock := datalayer.GetLastIndexedBlock(db, contract.Address)
 			if lastBlock > 0 {
 				lastProcessed[contract.Address] = uint64(lastBlock)
@@ -81,7 +85,27 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 			}
 			log.Printf("[mongo] initialized last processed block for %s: %d", contract.Address, lastProcessed[contract.Address])
 		}
+
+		// Initialize last processed for discovered contracts
+		for _, contract := range mappings.Contracts {
+			if contract.DiscoverEvent == "" {
+				continue
+			}
+			discovered := mapper.GetDiscoveredContracts(contract.DiscoverEvent)
+			for _, addr := range discovered {
+				lastBlock := datalayer.GetLastIndexedBlock(db, addr)
+				if lastBlock > 0 {
+					lastProcessed[addr] = uint64(lastBlock)
+				} else {
+					lastProcessed[addr] = 0
+				}
+				log.Printf("[mongo] initialized last processed block for discovered contract %s: %d", addr, lastProcessed[addr])
+			}
+		}
 	}
+
+	// Track last scanned block for discovery
+	lastDiscoveryScan := make(map[string]uint64)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -98,10 +122,42 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				continue
 			}
 
-			// Process each contract
+			// Phase 1: Discovery scan — find new contracts emitting discover events
 			for _, contract := range mappings.Contracts {
+				if contract.DiscoverEvent == "" || contract.Address != "" {
+					continue
+				}
+				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, contract, lastDiscoveryScan); err != nil {
+					log.Printf("[mongo] discovery scan error for event %s: %v", contract.DiscoverEvent, err)
+				}
+			}
+
+			// Phase 2: Process each static contract
+			for _, contract := range mappings.Contracts {
+				if contract.Address == "" {
+					continue // skip templates
+				}
 				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, contract, lastProcessed); err != nil {
 					log.Printf("[mongo] error processing contract %s: %v", contract.Address, err)
+				}
+			}
+
+			// Phase 3: Process discovered contracts using their template mappings
+			for _, contract := range mappings.Contracts {
+				if contract.DiscoverEvent == "" || contract.Address != "" {
+					continue
+				}
+				discovered := mapper.GetDiscoveredContracts(contract.DiscoverEvent)
+				for _, addr := range discovered {
+					// Create a virtual contract mapping with the discovered address
+					virtualContract := types.ContractMapping{
+						Address:         addr,
+						FromBlockHeight: contract.FromBlockHeight,
+						Events:          contract.Events,
+					}
+					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, virtualContract, lastProcessed); err != nil {
+						log.Printf("[mongo] error processing discovered contract %s: %v", addr, err)
+					}
 				}
 			}
 		}
@@ -226,6 +282,110 @@ func processContract(
 	}
 
 	return nil
+}
+
+// scanForDiscovery scans ALL contract_state documents for logs matching a DiscoverEvent.
+// When found, it registers the contract_id so future polls will index its events.
+func scanForDiscovery(
+	ctx context.Context,
+	db *sql.DB,
+	contractStateCol *mongo.Collection,
+	blockHeadersCol *mongo.Collection,
+	template types.ContractMapping,
+	lastScan map[string]uint64,
+) error {
+	// Query all contract_state docs with logs, above our last scan height
+	filter := bson.M{
+		"block_height": bson.M{"$gt": lastScan[template.DiscoverEvent]},
+		"results.logs": bson.M{"$exists": true, "$not": bson.M{"$size": 0}},
+	}
+
+	findOptions := options.Find().
+		SetSort(bson.D{{Key: "block_height", Value: 1}}).
+		SetLimit(1000) // limit per scan to avoid huge queries
+
+	cursor, err := contractStateCol.Find(ctx, filter, findOptions)
+	if err != nil {
+		return fmt.Errorf("discovery scan query failed: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	var maxBlock uint64 = lastScan[template.DiscoverEvent]
+
+	for cursor.Next(ctx) {
+		var doc MongoContractState
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+
+		if doc.BlockHeight > maxBlock {
+			maxBlock = doc.BlockHeight
+		}
+
+		// Check each log for the discover event
+		for _, result := range doc.Results {
+			for _, logEntry := range result.Logs {
+				if !strings.HasPrefix(strings.TrimSpace(logEntry), "{") {
+					continue
+				}
+				var raw map[string]interface{}
+				if err := json.Unmarshal([]byte(logEntry), &raw); err != nil {
+					continue
+				}
+				eventType, _ := raw["type"].(string)
+				if eventType != template.DiscoverEvent {
+					continue
+				}
+
+				// Found a matching discover event — register this contract
+				isNew, err := mapper.RegisterDiscoveredContract(db, doc.ContractID, template.DiscoverEvent, doc.BlockHeight)
+				if err != nil {
+					log.Printf("[discovery] failed to register contract %s: %v", doc.ContractID, err)
+					continue
+				}
+				if isNew {
+					log.Printf("[discovery] discovered new contract %s via %q at block %d",
+						doc.ContractID, template.DiscoverEvent, doc.BlockHeight)
+
+					// Also insert the discovery log itself
+					timestamp, err := getBlockTimestamp(ctx, blockHeadersCol, doc.BlockHeight)
+					if err != nil {
+						timestamp = time.Now().Format(time.RFC3339)
+					}
+					txHash := fmt.Sprintf("%s_%d", doc.DocID, doc.BlockHeight)
+					ev := types.LogEvent{
+						BlockHeight:     doc.BlockHeight,
+						TxHash:          txHash,
+						ContractAddress: doc.ContractID,
+						Log:             logEntry,
+						Timestamp:       timestamp,
+					}
+
+					// Insert raw log
+					_, _ = db.Exec(
+						`INSERT INTO contract_logs (block_height, tx_hash, contract_address, log, ts)
+						 VALUES ($1, $2, $3, $4, $5)
+						 ON CONFLICT DO NOTHING`,
+						ev.BlockHeight, ev.TxHash, ev.ContractAddress, ev.Log, ev.Timestamp,
+					)
+
+					// Insert into mapped table if there's a mapping for the discover event
+					for _, m := range template.Events {
+						if m.LogType == template.DiscoverEvent {
+							datalayer.InsertLog(db, m, ev)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if maxBlock > lastScan[template.DiscoverEvent] {
+		lastScan[template.DiscoverEvent] = maxBlock
+	}
+
+	return cursor.Err()
 }
 
 // ParseMongoLog is a helper to parse log data if it comes as JSON
