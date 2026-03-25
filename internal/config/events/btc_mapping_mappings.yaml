@@ -37,13 +37,34 @@ contracts:
           magi_fee: "1"
           btc_fee: "2"
 
+      # Transfer Events - BTC transferred between accounts
+      - log_type: "xfer"
+        table: "btc_mapping_transfer_events"
+        schema:
+          from_addr: string
+          to_addr: string
+          amount: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          from_addr: "1"
+          to_addr: "2"
+          amount: "3"
+
       # Unmap Events - BTC withdrawal initiated
       - log_type: "unm"
         table: "btc_mapping_unmap_events"
         schema:
           tx_id: string
+          from_addr: string
+          deducted: numeric
+          sent: numeric
         parse: "csv"
         delimiter: "|"
         key_delimiter: "="
         fields:
           tx_id: "1"
+          from_addr: "2"
+          deducted: "3"
+          sent: "4"

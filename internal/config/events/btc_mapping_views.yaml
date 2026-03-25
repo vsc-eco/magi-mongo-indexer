@@ -59,3 +59,39 @@ views:
         COALESCE(SUM(amount), 0) AS total_sats
       FROM btc_mapping_deposit_events
       WHERE indexer_ts > NOW() - INTERVAL '30 days';
+
+  # BTC balance per account (deposits + transfers_in - transfers_out - unmaps)
+  - name: btc_mapping_balances
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_balances AS
+      WITH deposits AS (
+        SELECT recipient AS account, COALESCE(SUM(amount), 0) AS total
+        FROM btc_mapping_deposit_events GROUP BY recipient
+      ),
+      xfer_in AS (
+        SELECT to_addr AS account, COALESCE(SUM(amount), 0) AS total
+        FROM btc_mapping_transfer_events GROUP BY to_addr
+      ),
+      xfer_out AS (
+        SELECT from_addr AS account, COALESCE(SUM(amount), 0) AS total
+        FROM btc_mapping_transfer_events GROUP BY from_addr
+      ),
+      unmaps AS (
+        SELECT from_addr AS account, COALESCE(SUM(deducted), 0) AS total
+        FROM btc_mapping_unmap_events GROUP BY from_addr
+      ),
+      all_accounts AS (
+        SELECT account FROM deposits UNION
+        SELECT account FROM xfer_in UNION
+        SELECT account FROM xfer_out UNION
+        SELECT account FROM unmaps
+      )
+      SELECT
+        a.account,
+        COALESCE(d.total, 0) + COALESCE(xi.total, 0)
+        - COALESCE(xo.total, 0) - COALESCE(u.total, 0) AS balance_sats
+      FROM all_accounts a
+      LEFT JOIN deposits d ON a.account = d.account
+      LEFT JOIN xfer_in xi ON a.account = xi.account
+      LEFT JOIN xfer_out xo ON a.account = xo.account
+      LEFT JOIN unmaps u ON a.account = u.account;
