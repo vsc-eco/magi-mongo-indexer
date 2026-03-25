@@ -30,8 +30,9 @@ func EnsureTables(db *sql.DB, mappings *types.MappingFile) error {
 		tx_hash TEXT,
 		contract_address TEXT,
 		log TEXT,
+		log_hash TEXT GENERATED ALWAYS AS (md5(log)) STORED,
 		ts TIMESTAMP,
-		UNIQUE (block_height, tx_hash, contract_address, log)
+		UNIQUE (block_height, tx_hash, contract_address, log_hash)
 	)`)
 	if err != nil {
 		return err

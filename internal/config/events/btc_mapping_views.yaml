@@ -1,0 +1,61 @@
+# ===============================
+# BTC MAPPING VIEWS
+# ===============================
+
+views:
+  # Total BTC mapped (deposits - unmaps by fee amounts)
+  - name: btc_mapping_stats
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_stats AS
+      SELECT
+        COUNT(*) AS total_deposits,
+        COALESCE(SUM(amount), 0) AS total_deposited_sats,
+        (SELECT COUNT(*) FROM btc_mapping_unmap_events) AS total_unmaps,
+        (SELECT COALESCE(SUM(magi_fee), 0) FROM btc_mapping_fee_events) AS total_magi_fees,
+        (SELECT COALESCE(SUM(btc_fee), 0) FROM btc_mapping_fee_events) AS total_btc_fees
+      FROM btc_mapping_deposit_events;
+
+  # Recent deposits
+  - name: btc_mapping_recent_deposits
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_recent_deposits AS
+      SELECT
+        recipient,
+        sender,
+        amount,
+        indexer_tx_hash AS tx_hash,
+        indexer_block_height AS block_height,
+        indexer_ts AS ts
+      FROM btc_mapping_deposit_events
+      ORDER BY indexer_block_height DESC
+      LIMIT 50;
+
+  # Deposit volume - 24h
+  - name: btc_mapping_volume_24h
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_volume_24h AS
+      SELECT
+        COUNT(*) AS deposit_count,
+        COALESCE(SUM(amount), 0) AS total_sats
+      FROM btc_mapping_deposit_events
+      WHERE indexer_ts > NOW() - INTERVAL '24 hours';
+
+  # Deposit volume - 7d
+  - name: btc_mapping_volume_7d
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_volume_7d AS
+      SELECT
+        COUNT(*) AS deposit_count,
+        COALESCE(SUM(amount), 0) AS total_sats
+      FROM btc_mapping_deposit_events
+      WHERE indexer_ts > NOW() - INTERVAL '7 days';
+
+  # Deposit volume - 30d
+  - name: btc_mapping_volume_30d
+    sql: |
+      CREATE OR REPLACE VIEW btc_mapping_volume_30d AS
+      SELECT
+        COUNT(*) AS deposit_count,
+        COALESCE(SUM(amount), 0) AS total_sats
+      FROM btc_mapping_deposit_events
+      WHERE indexer_ts > NOW() - INTERVAL '30 days';

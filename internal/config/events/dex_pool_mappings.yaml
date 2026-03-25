@@ -1,0 +1,111 @@
+# ===============================
+# DEX POOL - AUTO-DISCOVERED MAPPINGS
+# ===============================
+#
+# Pools are discovered via the "pool_init" log emitted by each DEX pool
+# contract during initialization. Once discovered, all pool events
+# (swaps, liquidity changes, fees) are indexed automatically.
+#
+# Log format: CSV with "|" delimiter and "=" key separator
+# ===============================
+
+contracts:
+  - discoverEvent: "pool_init"
+    events:
+      # Pool Initialization (discovery event)
+      - log_type: "pool_init"
+        table: "dex_pool_init_events"
+        schema:
+          asset0: string
+          asset1: string
+          fee_bps: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          asset0: "1"
+          asset1: "2"
+          fee_bps: "3"
+
+      # Swap Events
+      - log_type: "swap"
+        table: "dex_pool_swap_events"
+        schema:
+          asset_in: string
+          asset_out: string
+          amount_in: numeric
+          amount_out: numeric
+          recipient: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          asset_in: "1"
+          asset_out: "2"
+          amount_in: "3"
+          amount_out: "4"
+          recipient: "5"
+
+      # Fee Events (emitted alongside swaps)
+      - log_type: "fee"
+        table: "dex_pool_fee_events"
+        schema:
+          total_fee: numeric
+          magi_fee: numeric
+          lp_fee: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          total_fee: "1"
+          magi_fee: "2"
+          lp_fee: "3"
+
+      # Add Liquidity Events
+      - log_type: "add_liq"
+        table: "dex_pool_add_liq_events"
+        schema:
+          provider: string
+          amount0: numeric
+          amount1: numeric
+          lp_minted: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          provider: "1"
+          amount0: "2"
+          amount1: "3"
+          lp_minted: "4"
+
+      # Remove Liquidity Events
+      - log_type: "rem_liq"
+        table: "dex_pool_rem_liq_events"
+        schema:
+          provider: string
+          amount0: numeric
+          amount1: numeric
+          lp_burned: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          provider: "1"
+          amount0: "2"
+          amount1: "3"
+          lp_burned: "4"
+
+      # Migration Events
+      - log_type: "migrate"
+        table: "dex_pool_migrate_events"
+        schema:
+          version: string
+          asset0: string
+          asset1: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          version: "1"
+          asset0: "2"
+          asset1: "3"

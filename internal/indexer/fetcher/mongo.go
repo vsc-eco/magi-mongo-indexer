@@ -252,7 +252,6 @@ func processContract(
 				)
 				if err != nil {
 					log.Printf("[mongo] insert contract_logs error: %v", err)
-					continue
 				}
 
 				// Find mapping and insert into specific table

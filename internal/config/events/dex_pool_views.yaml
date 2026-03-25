@@ -1,0 +1,176 @@
+# ===============================
+# DEX POOL VIEWS
+# ===============================
+
+views:
+  # Pool registry - one row per discovered pool
+  - name: dex_pool_registry
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_registry AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        asset0,
+        asset1,
+        fee_bps,
+        indexer_block_height AS init_block,
+        indexer_ts AS init_ts
+      FROM dex_pool_init_events;
+
+  # Current liquidity per pool (net of adds - removes)
+  - name: dex_pool_liquidity
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_liquidity AS
+      WITH adds AS (
+        SELECT indexer_contract_id, SUM(amount0) AS total_add0, SUM(amount1) AS total_add1, SUM(lp_minted) AS total_minted
+        FROM dex_pool_add_liq_events GROUP BY indexer_contract_id
+      ),
+      removes AS (
+        SELECT indexer_contract_id, SUM(amount0) AS total_rem0, SUM(amount1) AS total_rem1, SUM(lp_burned) AS total_burned
+        FROM dex_pool_rem_liq_events GROUP BY indexer_contract_id
+      )
+      SELECT
+        COALESCE(a.indexer_contract_id, r.indexer_contract_id) AS pool_contract,
+        COALESCE(a.total_add0, 0) - COALESCE(r.total_rem0, 0) AS reserve0,
+        COALESCE(a.total_add1, 0) - COALESCE(r.total_rem1, 0) AS reserve1,
+        COALESCE(a.total_minted, 0) - COALESCE(r.total_burned, 0) AS total_lp
+      FROM adds a
+      FULL OUTER JOIN removes r ON a.indexer_contract_id = r.indexer_contract_id;
+
+  # LP positions per provider per pool
+  - name: dex_pool_lp_positions
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_lp_positions AS
+      WITH minted AS (
+        SELECT indexer_contract_id, provider, SUM(lp_minted) AS total_minted
+        FROM dex_pool_add_liq_events GROUP BY indexer_contract_id, provider
+      ),
+      burned AS (
+        SELECT indexer_contract_id, provider, SUM(lp_burned) AS total_burned
+        FROM dex_pool_rem_liq_events GROUP BY indexer_contract_id, provider
+      )
+      SELECT
+        COALESCE(m.indexer_contract_id, b.indexer_contract_id) AS pool_contract,
+        COALESCE(m.provider, b.provider) AS provider,
+        COALESCE(m.total_minted, 0) - COALESCE(b.total_burned, 0) AS lp_balance
+      FROM minted m
+      FULL OUTER JOIN burned b ON m.indexer_contract_id = b.indexer_contract_id AND m.provider = b.provider;
+
+  # Swap volume - 24h
+  - name: dex_pool_volume_24h
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_volume_24h AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        COUNT(*) AS swap_count,
+        SUM(amount_in) AS total_volume_in,
+        SUM(amount_out) AS total_volume_out
+      FROM dex_pool_swap_events
+      WHERE indexer_ts > NOW() - INTERVAL '24 hours'
+      GROUP BY indexer_contract_id;
+
+  # Swap volume - 7d
+  - name: dex_pool_volume_7d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_volume_7d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        COUNT(*) AS swap_count,
+        SUM(amount_in) AS total_volume_in,
+        SUM(amount_out) AS total_volume_out
+      FROM dex_pool_swap_events
+      WHERE indexer_ts > NOW() - INTERVAL '7 days'
+      GROUP BY indexer_contract_id;
+
+  # Swap volume - 30d
+  - name: dex_pool_volume_30d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_volume_30d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        COUNT(*) AS swap_count,
+        SUM(amount_in) AS total_volume_in,
+        SUM(amount_out) AS total_volume_out
+      FROM dex_pool_swap_events
+      WHERE indexer_ts > NOW() - INTERVAL '30 days'
+      GROUP BY indexer_contract_id;
+
+  # Swap volume - all time
+  - name: dex_pool_volume_all
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_volume_all AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        COUNT(*) AS swap_count,
+        SUM(amount_in) AS total_volume_in,
+        SUM(amount_out) AS total_volume_out
+      FROM dex_pool_swap_events
+      GROUP BY indexer_contract_id;
+
+  # Fees earned - 24h
+  - name: dex_pool_fees_24h
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_24h AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        SUM(total_fee) AS total_fees,
+        SUM(magi_fee) AS protocol_fees,
+        SUM(lp_fee) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE indexer_ts > NOW() - INTERVAL '24 hours'
+      GROUP BY indexer_contract_id;
+
+  # Fees earned - 7d
+  - name: dex_pool_fees_7d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_7d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        SUM(total_fee) AS total_fees,
+        SUM(magi_fee) AS protocol_fees,
+        SUM(lp_fee) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE indexer_ts > NOW() - INTERVAL '7 days'
+      GROUP BY indexer_contract_id;
+
+  # Fees earned - 30d
+  - name: dex_pool_fees_30d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_30d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        SUM(total_fee) AS total_fees,
+        SUM(magi_fee) AS protocol_fees,
+        SUM(lp_fee) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE indexer_ts > NOW() - INTERVAL '30 days'
+      GROUP BY indexer_contract_id;
+
+  # Fees earned - all time
+  - name: dex_pool_fees_all
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_all AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        SUM(total_fee) AS total_fees,
+        SUM(magi_fee) AS protocol_fees,
+        SUM(lp_fee) AS lp_fees
+      FROM dex_pool_fee_events
+      GROUP BY indexer_contract_id;
+
+  # Recent swaps (last 100)
+  - name: dex_pool_recent_swaps
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_recent_swaps AS
+      SELECT
+        s.indexer_contract_id AS pool_contract,
+        s.asset_in,
+        s.asset_out,
+        s.amount_in,
+        s.amount_out,
+        s.recipient,
+        s.indexer_tx_hash AS tx_hash,
+        s.indexer_block_height AS block_height,
+        s.indexer_ts AS ts
+      FROM dex_pool_swap_events s
+      ORDER BY s.indexer_block_height DESC
+      LIMIT 100;

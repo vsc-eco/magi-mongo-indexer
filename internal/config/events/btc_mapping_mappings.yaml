@@ -1,0 +1,49 @@
+# ===============================
+# BTC MAPPING CONTRACT - STATIC MAPPING
+# ===============================
+#
+# The BTC mapping contract has a known address. Events are CSV format
+# with "|" delimiter and "=" key separator.
+# ===============================
+
+contracts:
+  - address: "vsc1BYBwMvsSFwqvwzio352VWp6fGkjVs7t3Dp"
+    events:
+      # Deposit (map) Events - BTC deposited and credited to VSC account
+      - log_type: "dep"
+        table: "btc_mapping_deposit_events"
+        schema:
+          recipient: string
+          sender: string
+          amount: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          recipient: "1"
+          sender: "2"
+          amount: "3"
+
+      # Fee Events - fees charged on unmap
+      - log_type: "fee"
+        table: "btc_mapping_fee_events"
+        schema:
+          magi_fee: numeric
+          btc_fee: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          magi_fee: "1"
+          btc_fee: "2"
+
+      # Unmap Events - BTC withdrawal initiated
+      - log_type: "unm"
+        table: "btc_mapping_unmap_events"
+        schema:
+          tx_id: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          tx_id: "1"

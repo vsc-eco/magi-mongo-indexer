@@ -140,6 +140,15 @@ contracts:
           max_supply: "$.attributes.maxSupply"
           soulbound: "$.attributes.soulbound"
 
+      # Properties Set (emitted when custom properties are set on a token)
+      - log_type: "propertiesSet"
+        table: "magi_nft_properties_set_events"
+        schema:
+          token_id: string
+        parse: "json"
+        fields:
+          token_id: "$.attributes.tokenId"
+
       # Template Mint (batch mint with propertiesTemplate)
       - log_type: "templateMint"
         table: "magi_nft_template_mint_events"

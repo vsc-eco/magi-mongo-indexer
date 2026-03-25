@@ -7,6 +7,7 @@
 views:
 
   # NFT registry — one row per discovered NFT contract
+  # Only includes contracts created on or after 2026-03-11
   - name: magi_nft_registry
     sql: |
       CREATE OR REPLACE VIEW magi_nft_registry AS
@@ -18,9 +19,11 @@ views:
         owner,
         indexer_block_height AS init_block,
         indexer_ts AS init_ts
-      FROM magi_nft_init_events;
+      FROM magi_nft_init_events
+      WHERE indexer_ts >= '2026-03-11'::timestamp;
 
   # Unified transfer view — combines TransferSingle rows with unnested TransferBatch rows
+  # Filtered to only include contracts in the registry (post-cutoff)
   - name: magi_nft_all_transfers
     sql: |
       CREATE OR REPLACE VIEW magi_nft_all_transfers AS
@@ -34,6 +37,7 @@ views:
         indexer_block_height,
         indexer_ts
       FROM magi_nft_transfer_single_events
+      WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
       UNION ALL
       SELECT
         b.indexer_contract_id,
@@ -47,9 +51,11 @@ views:
       FROM magi_nft_transfer_batch_events b,
         LATERAL jsonb_array_elements_text(b.ids::jsonb) WITH ORDINALITY AS id_elem(val, ord),
         LATERAL jsonb_array_elements_text(b."values"::jsonb) WITH ORDINALITY AS val_elem(val, ord)
-      WHERE id_elem.ord = val_elem.ord;
+      WHERE id_elem.ord = val_elem.ord
+        AND b.indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry);
 
   # Template relationships — maps each token to its template (if any)
+  # Filtered to only include contracts in the registry (post-cutoff)
   - name: magi_nft_template_tokens
     sql: |
       CREATE OR REPLACE VIEW magi_nft_template_tokens AS
@@ -61,6 +67,7 @@ views:
         t.indexer_ts
       FROM magi_nft_template_mint_events t,
         LATERAL jsonb_array_elements_text(t.copy_ids::jsonb) AS copy_id(val)
+      WHERE t.indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
       UNION ALL
       SELECT
         indexer_contract_id AS contract_id,
@@ -68,20 +75,28 @@ views:
         template_id AS token_id,
         indexer_block_height,
         indexer_ts
-      FROM magi_nft_template_mint_events;
+      FROM magi_nft_template_mint_events
+      WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry);
 
-  # Token info — max supply, soulbound status from tokenCreated events
+  # Token info — max supply, soulbound status, has_properties from events
+  # Filtered to only include contracts in the registry (post-cutoff)
   - name: magi_nft_token_info
     sql: |
       CREATE OR REPLACE VIEW magi_nft_token_info AS
       SELECT
-        indexer_contract_id AS contract_id,
-        token_id,
-        max_supply::bigint AS max_supply,
-        (soulbound = 'true') AS soulbound,
-        indexer_block_height,
-        indexer_ts AS created_ts
-      FROM magi_nft_token_created_events;
+        tc.indexer_contract_id AS contract_id,
+        tc.token_id,
+        tc.max_supply::bigint AS max_supply,
+        (tc.soulbound = 'true') AS soulbound,
+        tc.indexer_block_height,
+        tc.indexer_ts AS created_ts,
+        (ps.token_id IS NOT NULL) AS has_properties
+      FROM magi_nft_token_created_events tc
+      LEFT JOIN (
+        SELECT DISTINCT indexer_contract_id, token_id
+        FROM magi_nft_properties_set_events
+      ) ps ON tc.indexer_contract_id = ps.indexer_contract_id AND tc.token_id = ps.token_id
+      WHERE tc.indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry);
 
   # Current NFT balances per (contract, account, token_id)
   # Computed from all transfer events (from='' is mint, to='' is burn)
@@ -144,6 +159,7 @@ views:
       GROUP BY indexer_contract_id;
 
   # Latest owner per NFT contract — tracks ownership changes
+  # Filtered to only include contracts in the registry (post-cutoff)
   - name: magi_nft_current_owner
     sql: |
       CREATE OR REPLACE VIEW magi_nft_current_owner AS
@@ -151,9 +167,11 @@ views:
         indexer_contract_id AS contract_id,
         new_owner AS owner
       FROM magi_nft_owner_change_events
+      WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
       ORDER BY indexer_contract_id, indexer_block_height DESC;
 
   # Current paused state per NFT contract
+  # Filtered to only include contracts in the registry (post-cutoff)
   - name: magi_nft_current_paused
     sql: |
       CREATE OR REPLACE VIEW magi_nft_current_paused AS
@@ -163,9 +181,11 @@ views:
       FROM (
         SELECT indexer_contract_id AS contract_id, indexer_block_height, 'paused' AS action
         FROM magi_nft_paused_events
+        WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
         UNION ALL
         SELECT indexer_contract_id AS contract_id, indexer_block_height, 'unpaused' AS action
         FROM magi_nft_unpaused_events
+        WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
       ) combined
       ORDER BY contract_id, indexer_block_height DESC;
 
