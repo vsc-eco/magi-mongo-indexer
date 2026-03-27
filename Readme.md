@@ -272,3 +272,73 @@ query {
 }
 ```
 This is useful for debugging new mappings or inspecting unexpected logs.
+
+## Backfilling testnet DEX pools
+
+The live indexer auto-discovers DEX pools by watching for `pool_init` logs emitted during contract initialization. Some testnet pools were deployed from older contract versions that did not emit this log, so they were never discovered. These pools need a one-time manual backfill.
+
+The current DEX contracts (`dex-contracts/`) **do** emit all required logs (`pool_init`, `swap`, `fee`, `amt`, `add_liq`, `rem_liq`, `migrate`), so any newly deployed pool will be indexed automatically. The backfill is only needed for legacy pools.
+
+### When to backfill
+
+You need to backfill a pool if:
+- The pool was deployed before logging was added to `Init`
+- The pool was migrated and its `init` call didn't produce a `pool_init` log
+- Swaps go through the router (`execute` action) and the pool isn't in `discovered_contracts`
+
+You can check with:
+```sql
+-- Run inside the postgres container
+SELECT contract_id FROM discovered_contracts WHERE discover_event = 'pool_init';
+```
+
+### How to backfill
+
+There are two scripts in `scripts/`. Both are idempotent (safe to re-run).
+
+#### Option 1: MongoDB direct (recommended, full history)
+
+Reads all contract outputs directly from MongoDB. Handles all payload formats including BSON Binary from router `execute` calls.
+
+```bash
+npm install  # needs pg + mongodb packages
+node scripts/backfill_dex_pool_mongo.js <POOL_CONTRACT_ID> [MONGO_URI] [PG_URL]
+```
+
+Example:
+```bash
+node scripts/backfill_dex_pool_mongo.js \
+  vsc1BgwiEg8P5u2qYSV7DL8FCqrj5E7hWSYKmf \
+  "mongodb://127.0.0.1:27022" \
+  "postgres://indexer:indexerpass@127.0.0.1:5433/indexerdb"
+```
+
+This script:
+1. Fetches all successful contract outputs from MongoDB `contract_state`
+2. Resolves each input tx from `transaction_pool` to get the action and payload
+3. Parses router `execute` calls (swap/deposit/withdrawal) and direct calls
+4. Inserts into the correct tables (`dex_pool_swap_events`, `dex_pool_add_liq_events`, `dex_pool_rem_liq_events`, `dex_pool_init_events`)
+5. Registers the pool in `discovered_contracts` so the live indexer picks up future events
+
+#### Option 2: GraphQL API (no MongoDB access needed)
+
+Uses the VSC GraphQL API. Limited to the ~100 most recent outputs due to API pagination constraints.
+
+```bash
+npm install  # needs pg package
+node scripts/backfill_dex_pool.js <POOL_CONTRACT_ID> [GRAPHQL_URL] [PG_URL]
+```
+
+### Known testnet pools requiring backfill
+
+| Pool Contract | Pair | Notes |
+|---|---|---|
+| `vsc1BgwiEg8P5u2qYSV7DL8FCqrj5E7hWSYKmf` | BTC/HBD | Old contract, no `pool_init` log. Router: `vsc1BoZJMQqpmdLxUfyRt5Tz82YM7Z57r7Dos7` |
+
+### What gets backfilled
+
+- **init** - Pool initialization (asset pair, fee)
+- **swap** / **execute.swap** - Swap events with amounts parsed from payload + `ret` JSON
+- **deposit** / **execute.deposit** - Add liquidity events. Amounts from `payload.metadata.amount0`/`amount1`. Note: `lp_minted` is 0 when the contract doesn't return it in `ret`
+- **withdrawal** / **execute.withdrawal** - Remove liquidity events. LP burned from `payload.metadata.lp_amount`. Note: returned `amount0`/`amount1` are 0 when the contract doesn't return them in `ret`
+- Skipped: `approve`, `register_token`, `migrate`, `update_router` (not indexed)
