@@ -1,4 +1,4 @@
-name: magi-mongo-indexer-debug
+name: magi-mongo-indexer-debug-testnet
 
 services:
   # ================================
@@ -12,11 +12,10 @@ services:
       POSTGRES_PASSWORD: indexerpass
       POSTGRES_DB: indexerdb
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5435}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5436}:5432"
     volumes:
-      - postgres_data_debug:/var/lib/postgresql/data
+      - postgres_data_debug_testnet:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
-      # Mount init scripts for creating extra roles (e.g., gql_reader)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U indexer -d indexerdb"]
       interval: 5s
@@ -30,21 +29,14 @@ services:
     image: hasura/graphql-engine:v2.42.0
     restart: always
     ports:
-      - "${HASURA_PORT:-8088}:8080"   # UI/API exposed on localhost
+      - "${HASURA_PORT:-8089}:8080"
     environment:
-      # Hasura internal metadata DB (full rights)
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
-
-      # User-facing DB connection (read-only user recommended)
       HASURA_GRAPHQL_DATABASE_URL: postgres://gql_reader:readonlypass@postgres:5432/indexerdb
-
-      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"   # Enable web console
-      HASURA_GRAPHQL_DEV_MODE: "true"         # Helpful for hot reload / debugging
-      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET} # From .env
-
-      # public role
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
       HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
-
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,11 +45,11 @@ services:
   # Magi Mongo Indexer service
   # ================================
   magi-mongo-indexer:
-    build: .                          # Build local Dockerfile
+    build: .
     restart: always
     environment:
       DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb?sslmode=disable
-      MONGO_URI: mongodb://mongo_vsc:27017
+      MONGO_URI: mongodb://mongo_vsc_testnet:27017
       MONGO_DB_NAME: go-vsc
       POLL_INTERVAL_SEC: 5
       HASURA_URL: http://hasura:8080
@@ -73,13 +65,13 @@ services:
       hasura:
         condition: service_healthy
     networks:
-      - go-vsc-node   # join go-vsc-node network for MongoDB access
-      - default       # still on its own default network for postgres/hasura
+      - go-vsc-node-testnet
+      - default
 
 networks:
-  go-vsc-node:
+  go-vsc-node-testnet:
     external: true
-    name: vsc-deployment_go-vsc-node
+    name: vsc-deployment-testnet_go-vsc-node-testnet
 
 volumes:
-  postgres_data_debug:
+  postgres_data_debug_testnet:

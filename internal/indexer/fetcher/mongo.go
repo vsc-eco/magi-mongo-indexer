@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -321,18 +320,22 @@ func scanForDiscovery(
 			maxBlock = doc.BlockHeight
 		}
 
+		// Find the event mapping for the discover event so we know the parse format
+		var discoverMapping *types.EventMapping
+		for i, m := range template.Events {
+			if m.LogType == template.DiscoverEvent {
+				discoverMapping = &template.Events[i]
+				break
+			}
+		}
+		if discoverMapping == nil {
+			continue
+		}
+
 		// Check each log for the discover event
 		for _, result := range doc.Results {
 			for _, logEntry := range result.Logs {
-				if !strings.HasPrefix(strings.TrimSpace(logEntry), "{") {
-					continue
-				}
-				var raw map[string]interface{}
-				if err := json.Unmarshal([]byte(logEntry), &raw); err != nil {
-					continue
-				}
-				eventType, _ := raw["type"].(string)
-				if eventType != template.DiscoverEvent {
+				if !mapper.MatchesLogType(*discoverMapping, logEntry) {
 					continue
 				}
 
