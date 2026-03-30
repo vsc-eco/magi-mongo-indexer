@@ -1,4 +1,4 @@
-name: magi-mongo-indexer-debug
+name: magi-mongo-indexer
 
 services:
   # ================================
@@ -12,9 +12,9 @@ services:
       POSTGRES_PASSWORD: indexerpass
       POSTGRES_DB: indexerdb
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5435}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data_debug:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
       # Mount init scripts for creating extra roles (e.g., gql_reader)
     healthcheck:
@@ -30,7 +30,7 @@ services:
     image: hasura/graphql-engine:v2.42.0
     restart: always
     ports:
-      - "${HASURA_PORT:-8088}:8080"   # UI/API exposed on localhost
+      - "${HASURA_PORT:-8081}:8080"   # UI/API exposed on localhost
     environment:
       # Hasura internal metadata DB (full rights)
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
@@ -82,4 +82,4 @@ networks:
     name: vsc-deployment_go-vsc-node
 
 volumes:
-  postgres_data_debug:
+  postgres_data:
