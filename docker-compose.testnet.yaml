@@ -1,4 +1,4 @@
-name: magi-mongo-indexer-debug-testnet
+name: magi-mongo-indexer-testnet
 
 services:
   # ================================
@@ -12,9 +12,9 @@ services:
       POSTGRES_PASSWORD: indexerpass
       POSTGRES_DB: indexerdb
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5436}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - postgres_data_debug_testnet:/var/lib/postgresql/data
+      - postgres_data_testnet:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U indexer -d indexerdb"]
@@ -29,7 +29,7 @@ services:
     image: hasura/graphql-engine:v2.42.0
     restart: always
     ports:
-      - "${HASURA_PORT:-8089}:8080"
+      - "${HASURA_PORT:-8082}:8080"
     environment:
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
       HASURA_GRAPHQL_DATABASE_URL: postgres://gql_reader:readonlypass@postgres:5432/indexerdb
@@ -74,4 +74,4 @@ networks:
     name: vsc-deployment-testnet_go-vsc-node-testnet
 
 volumes:
-  postgres_data_debug_testnet:
+  postgres_data_testnet:
