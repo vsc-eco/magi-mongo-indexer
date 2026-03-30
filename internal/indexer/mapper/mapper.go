@@ -75,7 +75,7 @@ func FindMapping(addr string, logStr string) *types.EventMapping {
 		}
 
 		for _, m := range c.Events {
-			if matchesLogType(m, logStr) {
+			if MatchesLogType(m, logStr) {
 				return &m
 			}
 		}
@@ -83,8 +83,8 @@ func FindMapping(addr string, logStr string) *types.EventMapping {
 	return nil
 }
 
-// matchesLogType checks if a log string matches a mapping's log type.
-func matchesLogType(m types.EventMapping, logStr string) bool {
+// MatchesLogType checks if a log string matches a mapping's log type.
+func MatchesLogType(m types.EventMapping, logStr string) bool {
 	// JSON logs
 	if m.Parse == "json" && strings.HasPrefix(strings.TrimSpace(logStr), "{") {
 		var raw map[string]interface{}
