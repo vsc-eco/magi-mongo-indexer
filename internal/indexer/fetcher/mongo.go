@@ -309,8 +309,10 @@ func scanForDiscovery(
 	defer cursor.Close(ctx)
 
 	var maxBlock uint64 = lastScan[template.DiscoverEvent]
+	docsScanned := 0
 
 	for cursor.Next(ctx) {
+		docsScanned++
 		var doc MongoContractState
 		if err := cursor.Decode(&doc); err != nil {
 			continue
@@ -386,6 +388,9 @@ func scanForDiscovery(
 	if maxBlock > lastScan[template.DiscoverEvent] {
 		lastScan[template.DiscoverEvent] = maxBlock
 	}
+
+	log.Printf("[discovery] scan for %q: scanned %d docs, lastScan now at block %d",
+		template.DiscoverEvent, docsScanned, lastScan[template.DiscoverEvent])
 
 	return cursor.Err()
 }
