@@ -1,0 +1,25 @@
+# ===============================
+# DEX ROUTER - STATIC MAPPING
+# ===============================
+#
+# The dex router contract has a known address. Events are CSV format
+# with "|" delimiter and "=" key separator.
+# ===============================
+
+contracts:
+  - address: "vsc1BmjY9JwFQyvRwYhLpiXFCYeUqxmU8ykrAM"
+    events:
+      # Deposit (map) Events - BTC deposited and credited to VSC account
+      - log_type: "reg_pool"
+        table: "dex_router_register_pool_events"
+        schema:
+          asset0: string
+          asset1: string
+          pool_contract_id: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          asset0: "1"
+          asset1: "2"
+          pool_contract_id: "3"

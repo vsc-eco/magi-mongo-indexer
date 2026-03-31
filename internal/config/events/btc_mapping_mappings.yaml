@@ -83,3 +83,21 @@ contracts:
           from_addr: "2"
           deducted: "3"
           sent: "4"
+
+      - log_type: "unmap"
+        table: "btc_mapping_unmap_events"
+        schema:
+          tx_id: string
+          from_addr: string
+          to_addr: string
+          deducted: numeric
+          sent: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          tx_id: "1"
+          from_addr: "2"
+          to_addr: "3"
+          deducted: "4"
+          sent: "5"
