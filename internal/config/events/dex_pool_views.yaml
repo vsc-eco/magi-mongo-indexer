@@ -16,7 +16,7 @@ views:
         indexer_ts AS init_ts
       FROM dex_pool_init_events;
 
-  # Current liquidity per pool (net of adds - removes)
+  # Current liquidity per pool (net of adds - removes + swap impact)
   - name: dex_pool_liquidity
     sql: |
       CREATE OR REPLACE VIEW dex_pool_liquidity AS
@@ -27,14 +27,32 @@ views:
       removes AS (
         SELECT indexer_contract_id, SUM(amount0) AS total_rem0, SUM(amount1) AS total_rem1, SUM(lp_burned) AS total_burned
         FROM dex_pool_rem_liq_events GROUP BY indexer_contract_id
+      ),
+      pool_assets AS (
+        SELECT indexer_contract_id, asset0, asset1
+        FROM dex_pool_init_events
+      ),
+      swap_impact AS (
+        SELECT
+          s.indexer_contract_id,
+          SUM(CASE WHEN s.asset_in = p.asset0 THEN s.amount_in ELSE 0 END)
+          - SUM(CASE WHEN s.asset_out = p.asset0 THEN s.amount_out ELSE 0 END) AS net0,
+          SUM(CASE WHEN s.asset_in = p.asset1 THEN s.amount_in ELSE 0 END)
+          - SUM(CASE WHEN s.asset_out = p.asset1 THEN s.amount_out ELSE 0 END) AS net1
+        FROM dex_pool_swap_events s
+        JOIN pool_assets p ON s.indexer_contract_id = p.indexer_contract_id
+        GROUP BY s.indexer_contract_id
       )
       SELECT
         COALESCE(a.indexer_contract_id, r.indexer_contract_id) AS pool_contract,
-        COALESCE(a.total_add0, 0) - COALESCE(r.total_rem0, 0) AS reserve0,
-        COALESCE(a.total_add1, 0) - COALESCE(r.total_rem1, 0) AS reserve1,
+        COALESCE(a.total_add0, 0) - COALESCE(r.total_rem0, 0)
+          + COALESCE(sw.net0, 0) AS reserve0,
+        COALESCE(a.total_add1, 0) - COALESCE(r.total_rem1, 0)
+          + COALESCE(sw.net1, 0) AS reserve1,
         COALESCE(a.total_minted, 0) - COALESCE(r.total_burned, 0) AS total_lp
       FROM adds a
-      FULL OUTER JOIN removes r ON a.indexer_contract_id = r.indexer_contract_id;
+      FULL OUTER JOIN removes r ON a.indexer_contract_id = r.indexer_contract_id
+      LEFT JOIN swap_impact sw ON COALESCE(a.indexer_contract_id, r.indexer_contract_id) = sw.indexer_contract_id;
 
   # LP positions per provider per pool
   - name: dex_pool_lp_positions
