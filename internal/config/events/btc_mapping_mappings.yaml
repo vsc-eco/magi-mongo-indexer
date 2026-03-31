@@ -9,8 +9,23 @@
 contracts:
   - address: "vsc1BkWohDf5fPcwn7V9B9ar6TyiWc3A2ZGJ4t"
     events:
-      # Deposit (map) Events - BTC deposited and credited to VSC account
+      # Deposit Events - BTC deposited and credited to VSC account
       - log_type: "dep"
+        table: "btc_mapping_deposit_events"
+        schema:
+          recipient: string
+          sender: string
+          amount: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          recipient: "1"
+          sender: "2"
+          amount: "3"
+
+      # Map Events - same as deposit, alternate log type
+      - log_type: "map"
         table: "btc_mapping_deposit_events"
         schema:
           recipient: string

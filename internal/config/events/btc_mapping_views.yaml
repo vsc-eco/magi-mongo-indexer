@@ -61,10 +61,16 @@ views:
       WHERE indexer_ts > NOW() - INTERVAL '30 days';
 
   # BTC balance per account (deposits + transfers_in - transfers_out - unmaps)
+  # Transfers FROM the contract's own address are treated as mints (the
+  # contract is the token issuer and can create tokens without a prior
+  # credit), so the contract address itself is excluded from balances.
   - name: btc_mapping_balances
     sql: |
       CREATE OR REPLACE VIEW btc_mapping_balances AS
-      WITH deposits AS (
+      WITH contract_addr AS (
+        SELECT 'contract:vsc1BkWohDf5fPcwn7V9B9ar6TyiWc3A2ZGJ4t' AS addr
+      ),
+      deposits AS (
         SELECT recipient AS account, COALESCE(SUM(amount), 0) AS total
         FROM btc_mapping_deposit_events GROUP BY recipient
       ),
@@ -74,7 +80,9 @@ views:
       ),
       xfer_out AS (
         SELECT from_addr AS account, COALESCE(SUM(amount), 0) AS total
-        FROM btc_mapping_transfer_events GROUP BY from_addr
+        FROM btc_mapping_transfer_events
+        WHERE from_addr != (SELECT addr FROM contract_addr)
+        GROUP BY from_addr
       ),
       unmaps AS (
         SELECT from_addr AS account, COALESCE(SUM(deducted), 0) AS total
@@ -94,4 +102,5 @@ views:
       LEFT JOIN deposits d ON a.account = d.account
       LEFT JOIN xfer_in xi ON a.account = xi.account
       LEFT JOIN xfer_out xo ON a.account = xo.account
-      LEFT JOIN unmaps u ON a.account = u.account;
+      LEFT JOIN unmaps u ON a.account = u.account
+      WHERE a.account != (SELECT addr FROM contract_addr);
