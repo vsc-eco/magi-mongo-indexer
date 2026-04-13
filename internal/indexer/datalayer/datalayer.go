@@ -45,6 +45,7 @@ func EnsureTables(db *sql.DB, mappings *types.MappingFile) error {
 				"indexer_id SERIAL PRIMARY KEY",
 				"indexer_block_height BIGINT",
 				"indexer_tx_hash TEXT",
+				"indexer_output_hash TEXT",
 				"indexer_ts TIMESTAMP",
 				"indexer_log_hash TEXT",
 				"indexer_contract_id TEXT",
@@ -88,6 +89,10 @@ func EnsureTables(db *sql.DB, mappings *types.MappingFile) error {
 				if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`, pqQuoteIdent(m.Table), pqQuoteIdent(col), sqlType)); err != nil {
 					return err
 				}
+			}
+
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS indexer_output_hash TEXT`, pqQuoteIdent(m.Table))); err != nil {
+				return err
 			}
 
 			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS indexer_log_hash TEXT`, pqQuoteIdent(m.Table))); err != nil {
@@ -223,10 +228,10 @@ func BuildInsertSQL(mapping types.EventMapping, ev types.LogEvent) (string, []in
 	hashBytes := sha256.Sum256([]byte(hashInput))
 	logHash := hex.EncodeToString(hashBytes[:])
 
-	cols := []string{"indexer_block_height", "indexer_tx_hash", "indexer_ts", "indexer_log_hash", "indexer_contract_id"}
-	vals := []interface{}{ev.BlockHeight, ev.TxHash, ev.Timestamp, logHash, ev.ContractAddress}
-	placeholders := []string{"$1", "$2", "$3", "$4", "$5"}
-	i := 6
+	cols := []string{"indexer_block_height", "indexer_tx_hash", "indexer_output_hash", "indexer_ts", "indexer_log_hash", "indexer_contract_id"}
+	vals := []interface{}{ev.BlockHeight, ev.TxHash, ev.OutputHash, ev.Timestamp, logHash, ev.ContractAddress}
+	placeholders := []string{"$1", "$2", "$3", "$4", "$5", "$6"}
+	i := 7
 
 	// Add dynamic columns extracted from the log
 	for col, val := range parsed {

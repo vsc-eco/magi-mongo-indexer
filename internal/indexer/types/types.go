@@ -4,6 +4,7 @@ package types
 type LogEvent struct {
 	BlockHeight     uint64 `json:"blockHeight"`
 	TxHash          string `json:"txHash"`
+	OutputHash      string `json:"outputHash"`
 	ContractAddress string `json:"contractAddress"`
 	Log             string `json:"log"`
 	Timestamp       string `json:"timestamp"`

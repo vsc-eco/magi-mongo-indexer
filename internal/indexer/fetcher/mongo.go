@@ -41,6 +41,12 @@ type BlockHeader struct {
 	Timestamp  string `bson:"ts"`
 }
 
+// TransactionPoolRecord represents a document from the transaction_pool collection
+type TransactionPoolRecord struct {
+	Id             string `bson:"id"`
+	AnchoredHeight uint64 `bson:"anchr_height"`
+}
+
 // HandleMongo manages a connection to MongoDB and polls the contract_state collection
 // for new entries, inserting them into Postgres.
 func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.Duration) error {
@@ -63,6 +69,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 
 	contractStateCol := client.Database(dbName).Collection("contract_state")
 	blockHeadersCol := client.Database(dbName).Collection("block_headers")
+	txPoolCol := client.Database(dbName).Collection("transaction_pool")
 
 	// Track the last processed block height per contract
 	lastProcessed := make(map[string]uint64)
@@ -126,7 +133,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				if contract.DiscoverEvent == "" || contract.Address != "" {
 					continue
 				}
-				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, contract, lastDiscoveryScan); err != nil {
+				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, contract, lastDiscoveryScan); err != nil {
 					log.Printf("[mongo] discovery scan error for event %s: %v", contract.DiscoverEvent, err)
 				}
 			}
@@ -136,7 +143,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				if contract.Address == "" {
 					continue // skip templates
 				}
-				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, contract, lastProcessed); err != nil {
+				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, contract, lastProcessed); err != nil {
 					log.Printf("[mongo] error processing contract %s: %v", contract.Address, err)
 				}
 			}
@@ -154,7 +161,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 						FromBlockHeight: contract.FromBlockHeight,
 						Events:          contract.Events,
 					}
-					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, virtualContract, lastProcessed); err != nil {
+					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, virtualContract, lastProcessed); err != nil {
 						log.Printf("[mongo] error processing discovered contract %s: %v", addr, err)
 					}
 				}
@@ -185,6 +192,7 @@ func processContract(
 	db *sql.DB,
 	contractStateCol *mongo.Collection,
 	blockHeadersCol *mongo.Collection,
+	txPoolCol *mongo.Collection,
 	contract types.ContractMapping,
 	lastProcessed map[string]uint64,
 ) error {
@@ -215,28 +223,48 @@ func processContract(
 			continue
 		}
 
-		// Get the actual timestamp from block headers
-		timestamp, err := getBlockTimestamp(ctx, blockHeadersCol, doc.BlockHeight)
-		if err != nil {
-			log.Printf("[mongo] failed to get timestamp for block %d: %v, using current time", doc.BlockHeight, err)
-			timestamp = time.Now().Format(time.RFC3339)
-		}
-
-		// Process each result that has logs
-		for _, result := range doc.Results {
+		// Process each result that has logs, matching with corresponding input
+		for resultIdx, result := range doc.Results {
 			if len(result.Logs) == 0 {
 				continue
 			}
 
+			// Determine the input tx hash and block height for this result
+			var txHash string
+			var blockHeight uint64
+			var timestamp string
+
+			if resultIdx < len(doc.Inputs) {
+				txHash = doc.Inputs[resultIdx]
+
+				// Look up the inclusion height from transaction_pool
+				var txRecord TransactionPoolRecord
+				err := txPoolCol.FindOne(ctx, bson.M{"id": txHash}).Decode(&txRecord)
+				if err != nil {
+					log.Printf("[mongo] failed to look up tx %s in transaction_pool: %v, falling back to doc block height", txHash, err)
+					blockHeight = doc.BlockHeight
+				} else {
+					blockHeight = txRecord.AnchoredHeight
+				}
+			} else {
+				log.Printf("[mongo] result index %d exceeds inputs length %d for doc %s, falling back", resultIdx, len(doc.Inputs), doc.DocID)
+				txHash = doc.DocID
+				blockHeight = doc.BlockHeight
+			}
+
+			// Get the timestamp from block headers using the resolved block height
+			timestamp, err = getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
+			if err != nil {
+				log.Printf("[mongo] failed to get timestamp for block %d: %v, using current time", blockHeight, err)
+				timestamp = time.Now().Format(time.RFC3339)
+			}
+
 			// Process each log in the result
 			for _, logEntry := range result.Logs {
-				// Create a pseudo tx_hash from the doc ID and block height
-				txHash := fmt.Sprintf("%s_%d", doc.DocID, doc.BlockHeight)
-
-				// Convert to LogEvent
 				ev := types.LogEvent{
-					BlockHeight:     doc.BlockHeight,
+					BlockHeight:     blockHeight,
 					TxHash:          txHash,
+					OutputHash:      doc.DocID,
 					ContractAddress: doc.ContractID,
 					Log:             logEntry,
 					Timestamp:       timestamp,
@@ -289,6 +317,7 @@ func scanForDiscovery(
 	db *sql.DB,
 	contractStateCol *mongo.Collection,
 	blockHeadersCol *mongo.Collection,
+	txPoolCol *mongo.Collection,
 	template types.ContractMapping,
 	lastScan map[string]uint64,
 ) error {
@@ -333,7 +362,7 @@ func scanForDiscovery(
 		}
 
 		// Check each log for the discover event
-		for _, result := range doc.Results {
+		for resultIdx, result := range doc.Results {
 			for _, logEntry := range result.Logs {
 				if !mapper.MatchesLogType(*discoverMapping, logEntry) {
 					continue
@@ -349,15 +378,32 @@ func scanForDiscovery(
 					log.Printf("[discovery] discovered new contract %s via %q at block %d",
 						doc.ContractID, template.DiscoverEvent, doc.BlockHeight)
 
-					// Also insert the discovery log itself
-					timestamp, err := getBlockTimestamp(ctx, blockHeadersCol, doc.BlockHeight)
+					// Resolve input tx hash and block height
+					var txHash string
+					var blockHeight uint64
+					if resultIdx < len(doc.Inputs) {
+						txHash = doc.Inputs[resultIdx]
+						var txRecord TransactionPoolRecord
+						err := txPoolCol.FindOne(ctx, bson.M{"id": txHash}).Decode(&txRecord)
+						if err != nil {
+							log.Printf("[discovery] failed to look up tx %s in transaction_pool: %v, falling back", txHash, err)
+							blockHeight = doc.BlockHeight
+						} else {
+							blockHeight = txRecord.AnchoredHeight
+						}
+					} else {
+						txHash = doc.DocID
+						blockHeight = doc.BlockHeight
+					}
+
+					timestamp, err := getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
 					if err != nil {
 						timestamp = time.Now().Format(time.RFC3339)
 					}
-					txHash := fmt.Sprintf("%s_%d", doc.DocID, doc.BlockHeight)
 					ev := types.LogEvent{
-						BlockHeight:     doc.BlockHeight,
+						BlockHeight:     blockHeight,
 						TxHash:          txHash,
+						OutputHash:      doc.DocID,
 						ContractAddress: doc.ContractID,
 						Log:             logEntry,
 						Timestamp:       timestamp,
