@@ -47,6 +47,17 @@ type TransactionPoolRecord struct {
 	AnchoredHeight uint64 `bson:"anchr_height"`
 }
 
+// HiveBlockDocument represents a document from the hive_blocks collection
+type HiveBlockDocument struct {
+	Block *HiveBlock `bson:"block,omitempty"`
+}
+
+// HiveBlock represents the nested block data in hive_blocks
+type HiveBlock struct {
+	BlockNumber uint64 `bson:"block_number"`
+	Timestamp   string `bson:"timestamp"`
+}
+
 // HandleMongo manages a connection to MongoDB and polls the contract_state collection
 // for new entries, inserting them into Postgres.
 func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.Duration) error {
@@ -70,6 +81,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 	contractStateCol := client.Database(dbName).Collection("contract_state")
 	blockHeadersCol := client.Database(dbName).Collection("block_headers")
 	txPoolCol := client.Database(dbName).Collection("transaction_pool")
+	hiveBlocksCol := client.Database(dbName).Collection("hive_blocks")
 
 	// Track the last processed block height per contract
 	lastProcessed := make(map[string]uint64)
@@ -133,7 +145,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				if contract.DiscoverEvent == "" || contract.Address != "" {
 					continue
 				}
-				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, contract, lastDiscoveryScan); err != nil {
+				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, contract, lastDiscoveryScan); err != nil {
 					log.Printf("[mongo] discovery scan error for event %s: %v", contract.DiscoverEvent, err)
 				}
 			}
@@ -143,7 +155,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				if contract.Address == "" {
 					continue // skip templates
 				}
-				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, contract, lastProcessed); err != nil {
+				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, contract, lastProcessed); err != nil {
 					log.Printf("[mongo] error processing contract %s: %v", contract.Address, err)
 				}
 			}
@@ -161,7 +173,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 						FromBlockHeight: contract.FromBlockHeight,
 						Events:          contract.Events,
 					}
-					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, virtualContract, lastProcessed); err != nil {
+					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, virtualContract, lastProcessed); err != nil {
 						log.Printf("[mongo] error processing discovered contract %s: %v", addr, err)
 					}
 				}
@@ -186,6 +198,19 @@ func getBlockTimestamp(ctx context.Context, blockHeadersCol *mongo.Collection, b
 	return header.Timestamp, nil
 }
 
+// getHiveBlockTimestamp fetches the timestamp for a given block height from hive_blocks
+func getHiveBlockTimestamp(ctx context.Context, hiveBlocksCol *mongo.Collection, blockHeight uint64) (string, error) {
+	var doc HiveBlockDocument
+	err := hiveBlocksCol.FindOne(ctx, bson.M{"block.block_number": blockHeight}).Decode(&doc)
+	if err != nil {
+		return "", fmt.Errorf("failed to find hive block for height %d: %w", blockHeight, err)
+	}
+	if doc.Block == nil {
+		return "", fmt.Errorf("hive block document has no block data for height %d", blockHeight)
+	}
+	return doc.Block.Timestamp, nil
+}
+
 // processContract fetches new entries for a specific contract and processes them
 func processContract(
 	ctx context.Context,
@@ -193,6 +218,7 @@ func processContract(
 	contractStateCol *mongo.Collection,
 	blockHeadersCol *mongo.Collection,
 	txPoolCol *mongo.Collection,
+	hiveBlocksCol *mongo.Collection,
 	contract types.ContractMapping,
 	lastProcessed map[string]uint64,
 ) error {
@@ -229,10 +255,9 @@ func processContract(
 				continue
 			}
 
-			// Determine the input tx hash and block height for this result
+			// Determine the input tx hash, block height, and timestamp for this result
 			var txHash string
 			var blockHeight uint64
-			var timestamp string
 
 			if resultIdx < len(doc.Inputs) {
 				txHash = doc.Inputs[resultIdx]
@@ -252,11 +277,14 @@ func processContract(
 				blockHeight = doc.BlockHeight
 			}
 
-			// Get the timestamp from block headers using the resolved block height
-			timestamp, err = getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
+			// Get timestamp from hive_blocks, fall back to block_headers
+			timestamp, err := getHiveBlockTimestamp(ctx, hiveBlocksCol, blockHeight)
 			if err != nil {
-				log.Printf("[mongo] failed to get timestamp for block %d: %v, using current time", blockHeight, err)
-				timestamp = time.Now().Format(time.RFC3339)
+				timestamp, err = getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
+				if err != nil {
+					log.Printf("[mongo] failed to get timestamp for block %d: %v, using current time", blockHeight, err)
+					timestamp = time.Now().Format(time.RFC3339)
+				}
 			}
 
 			// Process each log in the result
@@ -318,6 +346,7 @@ func scanForDiscovery(
 	contractStateCol *mongo.Collection,
 	blockHeadersCol *mongo.Collection,
 	txPoolCol *mongo.Collection,
+	hiveBlocksCol *mongo.Collection,
 	template types.ContractMapping,
 	lastScan map[string]uint64,
 ) error {
@@ -396,9 +425,13 @@ func scanForDiscovery(
 						blockHeight = doc.BlockHeight
 					}
 
-					timestamp, err := getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
+					// Get timestamp from hive_blocks, fall back to block_headers
+					timestamp, err := getHiveBlockTimestamp(ctx, hiveBlocksCol, blockHeight)
 					if err != nil {
-						timestamp = time.Now().Format(time.RFC3339)
+						timestamp, err = getBlockTimestamp(ctx, blockHeadersCol, blockHeight)
+						if err != nil {
+							timestamp = time.Now().Format(time.RFC3339)
+						}
 					}
 					ev := types.LogEvent{
 						BlockHeight:     blockHeight,
