@@ -8,6 +8,8 @@ import (
 	"log"
 	"time"
 
+	"strings"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -211,6 +213,15 @@ func getHiveBlockTimestamp(ctx context.Context, hiveBlocksCol *mongo.Collection,
 	return doc.Block.Timestamp, nil
 }
 
+// txPoolID extracts the transaction ID used for transaction_pool lookups.
+// Inputs may contain a dash suffix (e.g. "abc123-1"); the lookup ID is the part before the first dash.
+func txPoolID(input string) string {
+	if idx := strings.IndexByte(input, '-'); idx >= 0 {
+		return input[:idx]
+	}
+	return input
+}
+
 // processContract fetches new entries for a specific contract and processes them
 func processContract(
 	ctx context.Context,
@@ -264,7 +275,7 @@ func processContract(
 
 				// Look up the inclusion height from transaction_pool
 				var txRecord TransactionPoolRecord
-				err := txPoolCol.FindOne(ctx, bson.M{"id": txHash}).Decode(&txRecord)
+				err := txPoolCol.FindOne(ctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
 				if err != nil {
 					log.Printf("[mongo] failed to look up tx %s in transaction_pool: %v, falling back to doc block height", txHash, err)
 					blockHeight = doc.BlockHeight
@@ -413,7 +424,7 @@ func scanForDiscovery(
 					if resultIdx < len(doc.Inputs) {
 						txHash = doc.Inputs[resultIdx]
 						var txRecord TransactionPoolRecord
-						err := txPoolCol.FindOne(ctx, bson.M{"id": txHash}).Decode(&txRecord)
+						err := txPoolCol.FindOne(ctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
 						if err != nil {
 							log.Printf("[discovery] failed to look up tx %s in transaction_pool: %v, falling back", txHash, err)
 							blockHeight = doc.BlockHeight
