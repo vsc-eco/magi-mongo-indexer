@@ -1,0 +1,16 @@
+# ===============================
+# CONTRACT TYPE LOOKUP VIEW
+# ===============================
+# Provides a unified view for looking up the type of any
+# auto-discovered contract via the discovered_contracts table.
+
+views:
+  - name: contract_type_lookup
+    sql: |
+      CREATE OR REPLACE VIEW contract_type_lookup AS
+      SELECT
+        contract_id,
+        discover_event AS contract_type,
+        block_height,
+        discovered_at
+      FROM discovered_contracts;
