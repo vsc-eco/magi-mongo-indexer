@@ -337,6 +337,7 @@ func grantPublicSelectPermission(url, secret, name, hasuraSource string, isView 
 			"permission": map[string]any{
 				"columns":            "*",
 				"filter":             map[string]any{},
+				"limit":              100,
 				"allow_aggregations": true,
 				"query_root_fields":  queryFields,
 				"subscription_root_fields": []string{

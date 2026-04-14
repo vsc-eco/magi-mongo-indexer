@@ -45,6 +45,9 @@ services:
       # public role
       HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
 
+      # cost limits
+      HASURA_GRAPHQL_MAX_TOTAL_NODE_LIMIT: "10000"
+
     depends_on:
       postgres:
         condition: service_healthy
