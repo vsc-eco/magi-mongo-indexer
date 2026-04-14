@@ -35,7 +35,8 @@ views:
         token_id,
         value,
         indexer_block_height,
-        indexer_ts
+        indexer_ts,
+        indexer_tx_hash
       FROM magi_nft_transfer_single_events
       WHERE indexer_contract_id IN (SELECT contract_id FROM magi_nft_registry)
       UNION ALL
@@ -47,7 +48,8 @@ views:
         id_elem.val AS token_id,
         (val_elem.val)::numeric AS value,
         b.indexer_block_height,
-        b.indexer_ts
+        b.indexer_ts,
+        b.indexer_tx_hash
       FROM magi_nft_transfer_batch_events b,
         LATERAL jsonb_array_elements_text(b.ids::jsonb) WITH ORDINALITY AS id_elem(val, ord),
         LATERAL jsonb_array_elements_text(b."values"::jsonb) WITH ORDINALITY AS val_elem(val, ord)
