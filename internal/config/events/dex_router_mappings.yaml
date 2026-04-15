@@ -7,7 +7,7 @@
 # ===============================
 
 contracts:
-  - address: "vsc1BmjY9JwFQyvRwYhLpiXFCYeUqxmU8ykrAM"
+  - address: "vsc1Brvi4YZHLkocYNAFd7Gf1JpsPjzNnv4i45"
     events:
       # Deposit (map) Events - BTC deposited and credited to VSC account
       - log_type: "reg_pool"
