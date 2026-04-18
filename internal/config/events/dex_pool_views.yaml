@@ -16,7 +16,24 @@ views:
         indexer_ts AS init_ts
       FROM dex_pool_init_events;
 
-  # Current liquidity per pool (net of adds - removes + swap impact)
+  # Current liquidity per pool (net of adds - removes + swap impact
+  # - protocol-fee drain).
+  #
+  # Contract accounting (see dex-contracts contracts/dex/main.go):
+  #   newRIn  = rIn + amountIn              -- entire input enters the pool
+  #   newROut = rOut - grossOut + lpFee     -- lpFee stays, magiFee leaves
+  # So per swap the reserve changes are:
+  #   delta(asset_in)  = + amount_in
+  #   delta(asset_out) = - (amount_out + magi_fee)
+  # The `amount_out` emitted on the swap event is already the NET amount the
+  # recipient receives (grossOut - baseFee - clpFee). The only piece the
+  # view was missing was the `magi_fee` portion that permanently leaves the
+  # pool to the protocol treasury. Subtracting it per asset here brings the
+  # view back into exact agreement with on-chain `r0`/`r1`.
+  #
+  # Only the 5-field fee log format carries `asset` - legacy 4-field rows
+  # have `asset IS NULL` and are ignored in the magi-fee drain (pools with
+  # only legacy history still drift, but no worse than before this fix).
   - name: dex_pool_liquidity
     sql: |
       CREATE OR REPLACE VIEW dex_pool_liquidity AS
@@ -42,17 +59,30 @@ views:
         FROM dex_pool_swap_events s
         JOIN pool_assets p ON s.indexer_contract_id = p.indexer_contract_id
         GROUP BY s.indexer_contract_id
+      ),
+      magi_fee_drain AS (
+        SELECT
+          f.indexer_contract_id,
+          SUM(CASE WHEN f.asset = p.asset0 THEN f.magi_fee ELSE 0 END) AS magi0,
+          SUM(CASE WHEN f.asset = p.asset1 THEN f.magi_fee ELSE 0 END) AS magi1
+        FROM dex_pool_fee_events f
+        JOIN pool_assets p ON f.indexer_contract_id = p.indexer_contract_id
+        WHERE f.asset IS NOT NULL
+        GROUP BY f.indexer_contract_id
       )
       SELECT
         COALESCE(a.indexer_contract_id, r.indexer_contract_id) AS pool_contract,
         COALESCE(a.total_add0, 0) - COALESCE(r.total_rem0, 0)
-          + COALESCE(sw.net0, 0) AS reserve0,
+          + COALESCE(sw.net0, 0)
+          - COALESCE(mf.magi0, 0) AS reserve0,
         COALESCE(a.total_add1, 0) - COALESCE(r.total_rem1, 0)
-          + COALESCE(sw.net1, 0) AS reserve1,
+          + COALESCE(sw.net1, 0)
+          - COALESCE(mf.magi1, 0) AS reserve1,
         COALESCE(a.total_minted, 0) - COALESCE(r.total_burned, 0) AS total_lp
       FROM adds a
       FULL OUTER JOIN removes r ON a.indexer_contract_id = r.indexer_contract_id
-      LEFT JOIN swap_impact sw ON COALESCE(a.indexer_contract_id, r.indexer_contract_id) = sw.indexer_contract_id;
+      LEFT JOIN swap_impact sw ON COALESCE(a.indexer_contract_id, r.indexer_contract_id) = sw.indexer_contract_id
+      LEFT JOIN magi_fee_drain mf ON COALESCE(a.indexer_contract_id, r.indexer_contract_id) = mf.indexer_contract_id;
 
   # LP positions per provider per pool
   - name: dex_pool_lp_positions
