@@ -63,6 +63,7 @@ services:
       MONGO_URI: mongodb://mongo_vsc:27017
       MONGO_DB_NAME: go-vsc
       POLL_INTERVAL_SEC: 5
+      BACKFILL_BLOCKS: ${BACKFILL_BLOCKS:-0}
       HASURA_URL: http://hasura:8080
       HASURA_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
       HASURA_SOURCE: default

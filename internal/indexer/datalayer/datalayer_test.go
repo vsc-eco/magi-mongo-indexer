@@ -104,9 +104,11 @@ func TestBuildInsertSQL_BasicFields(t *testing.T) {
 		t.Errorf("expected ON CONFLICT DO NOTHING clause")
 	}
 
-	// Verify minimum values (4 core fields + 2 parsed fields)
-	if len(vals) < 4 {
-		t.Errorf("expected at least 4 values, got %d", len(vals))
+	// Core fields populated by BuildInsertSQL (indexer_block_height,
+	// indexer_tx_hash, indexer_output_hash, indexer_ts, indexer_log_hash,
+	// indexer_contract_id) are 6 values, followed by parsed fields.
+	if len(vals) < 6 {
+		t.Errorf("expected at least 6 values, got %d", len(vals))
 	}
 
 	// Verify core field values
@@ -116,12 +118,12 @@ func TestBuildInsertSQL_BasicFields(t *testing.T) {
 	if vals[1] != "0xabc123" {
 		t.Errorf("expected tx_hash '0xabc123', got %v", vals[1])
 	}
-	if vals[2] != "2024-01-01T00:00:00Z" {
-		t.Errorf("expected timestamp '2024-01-01T00:00:00Z', got %v", vals[2])
+	if vals[3] != "2024-01-01T00:00:00Z" {
+		t.Errorf("expected timestamp '2024-01-01T00:00:00Z', got %v", vals[3])
 	}
-	// vals[3] is log_hash - should be a hex string
-	if hash, ok := vals[3].(string); !ok || len(hash) != 64 {
-		t.Errorf("expected 64-char hex hash, got %v", vals[3])
+	// vals[4] is log_hash - should be a hex string
+	if hash, ok := vals[4].(string); !ok || len(hash) != 64 {
+		t.Errorf("expected 64-char hex hash, got %v", vals[4])
 	}
 }
 
@@ -153,10 +155,10 @@ func TestBuildInsertSQL_LogHashUniqueness(t *testing.T) {
 	_, vals2 := BuildInsertSQL(mapping, ev2)
 	_, vals3 := BuildInsertSQL(mapping, ev3)
 
-	// log_hash is at index 3
-	hash1 := vals1[3].(string)
-	hash2 := vals2[3].(string)
-	hash3 := vals3[3].(string)
+	// log_hash is at index 4 (after block_height, tx_hash, output_hash, ts)
+	hash1 := vals1[4].(string)
+	hash2 := vals2[4].(string)
+	hash3 := vals3[4].(string)
 
 	if hash1 == hash2 {
 		t.Errorf("expected different log hashes for different logs")
@@ -186,8 +188,8 @@ func TestBuildInsertSQL_SameInputSameHash(t *testing.T) {
 	_, vals1 := BuildInsertSQL(mapping, ev)
 	_, vals2 := BuildInsertSQL(mapping, ev)
 
-	hash1 := vals1[3].(string)
-	hash2 := vals2[3].(string)
+	hash1 := vals1[4].(string)
+	hash2 := vals2[4].(string)
 
 	if hash1 != hash2 {
 		t.Errorf("expected same hash for identical input, got %s and %s", hash1, hash2)
@@ -257,9 +259,9 @@ func TestBuildInsertSQL_EmptyLog(t *testing.T) {
 		t.Errorf("expected valid INSERT statement for empty log")
 	}
 
-	// Should have exactly 4 core values
-	if len(vals) != 4 {
-		t.Errorf("expected 4 core values for empty log, got %d", len(vals))
+	// Should have exactly 6 core values
+	if len(vals) != 6 {
+		t.Errorf("expected 6 core values for empty log, got %d", len(vals))
 	}
 }
 

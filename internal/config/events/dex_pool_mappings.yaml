@@ -47,19 +47,34 @@ contracts:
           recipient: "5"
 
       # Fee Events (emitted alongside swaps)
+      #
+      # The fee log gained an `asset` field at position 1. Both layouts must
+      # remain indexable so fresh indexers can replay the full history.
+      #   legacy (4 parts): fee|t=108|m=27|lp=81
+      #   current (5 parts): fee|a=hive|t=108|m=27|lp=81
+      # For legacy rows, `asset` stays NULL.
       - log_type: "fee"
         table: "dex_pool_fee_events"
         schema:
           total_fee: numeric
           magi_fee: numeric
           lp_fee: numeric
+          asset: string
         parse: "csv"
         delimiter: "|"
         key_delimiter: "="
-        fields:
-          total_fee: "1"
-          magi_fee: "2"
-          lp_fee: "3"
+        variants:
+          - field_count: 4
+            fields:
+              total_fee: "1"
+              magi_fee: "2"
+              lp_fee: "3"
+          - field_count: 5
+            fields:
+              asset: "1"
+              total_fee: "2"
+              magi_fee: "3"
+              lp_fee: "4"
 
       # Add Liquidity Events
       - log_type: "add_liq"

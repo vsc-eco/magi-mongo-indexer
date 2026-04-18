@@ -15,15 +15,16 @@ func Init() {
 // Config holds all runtime configuration values for the indexer service.
 // Values are primarily loaded from environment variables, with sensible defaults.
 type Config struct {
-	DBURL         string        // Postgres connection string
-	MongoURI      string        // MongoDB connection URI
-	MongoDBName   string        // MongoDB database name
-	PollInterval  time.Duration // MongoDB polling interval
-	MappingsPath  string        // Path to mappings files (directory or single YAML)
-	ViewsPath     string        // Path to views files (directory or single YAML)
-	HasuraURL     string        // Hasura GraphQL endpoint (for metadata sync)
-	HasuraSecret  string        // Hasura admin secret
-	HasuraSource  string        // Hasura source database
+	DBURL          string        // Postgres connection string
+	MongoURI       string        // MongoDB connection URI
+	MongoDBName    string        // MongoDB database name
+	PollInterval   time.Duration // MongoDB polling interval
+	MappingsPath   string        // Path to mappings files (directory or single YAML)
+	ViewsPath      string        // Path to views files (directory or single YAML)
+	HasuraURL      string        // Hasura GraphQL endpoint (for metadata sync)
+	HasuraSecret   string        // Hasura admin secret
+	HasuraSource   string        // Hasura source database
+	BackfillBlocks uint64        // Re-parse raw logs from the last N blocks on startup (0 = off)
 }
 
 // LoadConfig reads configuration values from environment variables.
@@ -39,6 +40,8 @@ type Config struct {
 //   - HASURA_URL         → Hasura endpoint
 //   - HASURA_ADMIN_SECRET→ Hasura admin secret
 //   - HASURA_SOURCE      → Hasura source database name
+//   - BACKFILL_BLOCKS    → On startup, re-parse raw logs from the last N blocks
+//                          and fix rows with NULL schema columns (default: 0 = off)
 //
 // Defaults:
 //   - DBURL: postgres://indexer:indexerpass@localhost:5432/indexerdb?sslmode=disable
@@ -54,16 +57,24 @@ func LoadConfig() Config {
 		}
 	}
 
+	backfillBlocks := uint64(0)
+	if val := os.Getenv("BACKFILL_BLOCKS"); val != "" {
+		if parsed, err := strconv.ParseUint(val, 10, 64); err == nil {
+			backfillBlocks = parsed
+		}
+	}
+
 	cfg := Config{
-		DBURL:        os.Getenv("DATABASE_URL"),
-		MongoURI:     os.Getenv("MONGO_URI"),
-		MongoDBName:  os.Getenv("MONGO_DB_NAME"),
-		PollInterval: time.Duration(pollIntervalSec) * time.Second,
-		MappingsPath: os.Getenv("MAPPINGS_FILES"),
-		ViewsPath:    os.Getenv("VIEWS_FILES"),
-		HasuraURL:    os.Getenv("HASURA_URL"),
-		HasuraSecret: os.Getenv("HASURA_ADMIN_SECRET"),
-		HasuraSource: os.Getenv("HASURA_SOURCE"),
+		DBURL:          os.Getenv("DATABASE_URL"),
+		MongoURI:       os.Getenv("MONGO_URI"),
+		MongoDBName:    os.Getenv("MONGO_DB_NAME"),
+		PollInterval:   time.Duration(pollIntervalSec) * time.Second,
+		MappingsPath:   os.Getenv("MAPPINGS_FILES"),
+		ViewsPath:      os.Getenv("VIEWS_FILES"),
+		HasuraURL:      os.Getenv("HASURA_URL"),
+		HasuraSecret:   os.Getenv("HASURA_ADMIN_SECRET"),
+		HasuraSource:   os.Getenv("HASURA_SOURCE"),
+		BackfillBlocks: backfillBlocks,
 	}
 
 	// Apply defaults if not provided

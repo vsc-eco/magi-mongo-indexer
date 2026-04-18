@@ -91,6 +91,7 @@ If you need to change the MongoDB connection or polling interval, you can modify
       MONGO_URI: mongodb://mongo_vsc:27017           # MongoDB connection URI
       MONGO_DB_NAME: go-vsc                          # Database name
       POLL_INTERVAL_SEC: 5                           # Polling interval in seconds
+      BACKFILL_BLOCKS: 0                             # Startup re-parse window (0 = off, see below)
       ...
 ```
 
@@ -173,6 +174,39 @@ mint|id=123|by=bob
 ```
 
  The example output will be the same as above.
+
+#### Multiple CSV layouts (variants)
+
+Contracts evolve: a new field may get inserted at a fixed position and older logs must still be indexable. Instead of a single `fields` map, a CSV event can declare `variants` keyed by total token count. The parser splits on `delimiter`, picks the variant whose `field_count` matches, and maps columns accordingly. If no variant matches, the log is skipped.
+
+All variants write into the same `schema` (the union of their columns); columns missing from a variant stay `NULL` for logs parsed by it.
+
+```yaml
+- log_type: "fee"
+  table: "dex_pool_fee_events"
+  schema:              # union across variants
+    total_fee: numeric
+    magi_fee: numeric
+    lp_fee: numeric
+    asset: string      # only populated by the 5-field variant
+  parse: "csv"
+  delimiter: "|"
+  key_delimiter: "="
+  variants:
+    - field_count: 4   # legacy: fee|t=108|m=27|lp=81
+      fields:
+        total_fee: "1"
+        magi_fee: "2"
+        lp_fee: "3"
+    - field_count: 5   # current: fee|a=hive|t=108|m=27|lp=81
+      fields:
+        asset: "1"
+        total_fee: "2"
+        magi_fee: "3"
+        lp_fee: "4"
+```
+
+New columns are appended to the Postgres table via `ALTER TABLE ADD COLUMN IF NOT EXISTS`, so legacy rows keep their existing values and the new column is simply `NULL` for them.
 
 
 ## View Definitions in `internal/config/events/*_views.yaml`
@@ -272,6 +306,29 @@ query {
 }
 ```
 This is useful for debugging new mappings or inspecting unexpected logs.
+
+## Startup backfill of NULL columns (`BACKFILL_BLOCKS`)
+
+When a mapping gains a new column or a new CSV variant, rows indexed under the prior mapping will have `NULL` values (or, in the case of a variant mismatch, misaligned values) until the contract emits fresh logs. Rather than triggering a full re-index, the indexer can re-parse the recent tail on startup.
+
+Set `BACKFILL_BLOCKS` to the number of blocks to revisit per contract. On startup, for each known contract (static + discovered), the indexer reads the raw logs stored in `contract_logs` within `[max_block - N, max_block]`, re-applies the current mapping, and runs an `UPDATE` on the event table — gated on `<col> IS NULL OR ...` so correctly-parsed rows are never rewritten.
+
+```bash
+BACKFILL_BLOCKS=5000 docker compose up -d
+```
+
+Sample output on a run that fixed stale rows after the DEX `fee` event gained an `asset` field:
+
+```
+[backfill] scanning last 5000 blocks for NULL columns
+[backfill] complete — 24 row(s) updated across 12 contract(s), lookback=5000 blocks
+```
+
+Notes:
+- Default is `0` (off).
+- Cost scales with window size × raw log volume; pick the smallest window that covers your mapping change.
+- Only columns in the event's `schema` are considered for the NULL guard. `indexer_*` metadata columns are not touched.
+- Rows outside the window are ignored, so long-past corruption still needs a targeted script.
 
 ## Backfilling testnet DEX pools
 

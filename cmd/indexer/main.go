@@ -11,6 +11,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"github.com/tibfox/magi-mongo-indexer/internal/config"
+	"github.com/tibfox/magi-mongo-indexer/internal/indexer/backfill"
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/datalayer"
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/fetcher"
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/hasura"
@@ -62,6 +63,16 @@ func main() {
 		log.Fatal("❌ failed to sync tables/views in Hasura:", err)
 	}
 	log.Printf("[startup] ✅ Initial Hasura metadata sync complete")
+
+	// --- Optional backfill: re-parse the last N blocks of raw logs so rows
+	//     with NULL schema columns (e.g. after a mapping added a new variant
+	//     or column) get fixed without a full re-index.
+	if cfg.BackfillBlocks > 0 {
+		log.Printf("[backfill] scanning last %d blocks for NULL columns", cfg.BackfillBlocks)
+		if err := backfill.Run(db, mappings, cfg.BackfillBlocks); err != nil {
+			log.Printf("[backfill] error: %v", err)
+		}
+	}
 
 	// --- Watcher loop (recovers automatically) ---
 	go func() {

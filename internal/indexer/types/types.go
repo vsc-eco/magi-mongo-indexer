@@ -27,6 +27,12 @@ type ContractMapping struct {
 }
 
 // EventMapping defines how a specific log/event should be parsed and stored.
+//
+// For CSV logs, either Fields or Variants must be set. Variants lets the
+// same log_type be parsed under different layouts, selected by token count —
+// useful when a contract adds a new field at a fixed position and older logs
+// still need to be indexed. All variants write into the same Schema; columns
+// absent from a given variant stay NULL for logs parsed by that variant.
 type EventMapping struct {
 	LogType      string            `yaml:"log_type"`
 	Table        string            `yaml:"table"`
@@ -34,7 +40,16 @@ type EventMapping struct {
 	Parse        string            `yaml:"parse"`
 	Delimiter    string            `yaml:"delimiter,omitempty"`
 	KeyDelimiter string            `yaml:"key_delimiter,omitempty"`
-	Fields       map[string]string `yaml:"fields"`
+	Fields       map[string]string `yaml:"fields,omitempty"`
+	Variants     []EventVariant    `yaml:"variants,omitempty"`
+}
+
+// EventVariant describes one possible CSV layout for an event. FieldCount is
+// the total number of tokens after splitting by Delimiter (including the
+// leading log_type token).
+type EventVariant struct {
+	FieldCount int               `yaml:"field_count"`
+	Fields     map[string]string `yaml:"fields"`
 }
 
 // ViewsFile defines the structure of a *_views.yaml configuration file.

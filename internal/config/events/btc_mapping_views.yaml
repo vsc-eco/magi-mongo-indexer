@@ -68,7 +68,7 @@ views:
     sql: |
       CREATE OR REPLACE VIEW btc_mapping_balances AS
       WITH contract_addr AS (
-        SELECT 'contract:vsc1BkWohDf5fPcwn7V9B9ar6TyiWc3A2ZGJ4t' AS addr
+        SELECT 'contract:vsc1BdrQ6EtbQ64rq2PkPd21x4MaLnVRcJj85d' AS addr
       ),
       deposits AS (
         SELECT recipient AS account, COALESCE(SUM(amount), 0) AS total

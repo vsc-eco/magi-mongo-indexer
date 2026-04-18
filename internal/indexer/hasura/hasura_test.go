@@ -45,8 +45,8 @@ func TestGetDesiredAndTracked_DesiredTables(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Check desired tables (should include contract_logs + all mapped tables)
-	expectedTables := []string{"contract_logs", "events_a", "events_b", "events_c"}
+	// Check desired tables (should include contract_logs + discovered_contracts + all mapped tables)
+	expectedTables := []string{"contract_logs", "discovered_contracts", "events_a", "events_b", "events_c"}
 	for _, table := range expectedTables {
 		if _, ok := desiredTables[table]; !ok {
 			t.Errorf("expected table %q in desiredTables", table)
@@ -97,13 +97,16 @@ func TestGetDesiredAndTracked_EmptyMappings(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should still have contract_logs
+	// Should still have contract_logs and discovered_contracts
 	if _, ok := desiredTables["contract_logs"]; !ok {
 		t.Error("expected contract_logs in desiredTables even with empty mappings")
 	}
+	if _, ok := desiredTables["discovered_contracts"]; !ok {
+		t.Error("expected discovered_contracts in desiredTables even with empty mappings")
+	}
 
-	if len(desiredTables) != 1 {
-		t.Errorf("expected exactly 1 desired table (contract_logs), got %d", len(desiredTables))
+	if len(desiredTables) != 2 {
+		t.Errorf("expected exactly 2 desired tables (contract_logs + discovered_contracts), got %d", len(desiredTables))
 	}
 
 	// Should still have the built-in indexer_health view
@@ -143,9 +146,9 @@ func TestGetDesiredAndTracked_DuplicateTableNames(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Map should deduplicate - should have contract_logs + shared_table
-	if len(desiredTables) != 2 {
-		t.Errorf("expected 2 unique tables (contract_logs + shared_table), got %d", len(desiredTables))
+	// Map should deduplicate - should have contract_logs + discovered_contracts + shared_table
+	if len(desiredTables) != 3 {
+		t.Errorf("expected 3 unique tables (contract_logs + discovered_contracts + shared_table), got %d", len(desiredTables))
 	}
 
 	if _, ok := desiredTables["shared_table"]; !ok {
@@ -188,12 +191,12 @@ func TestGetDesiredAndTracked_MultipleContracts(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should have contract_logs + 5 tables from events
-	if len(desiredTables) != 6 {
-		t.Errorf("expected 6 tables, got %d", len(desiredTables))
+	// Should have contract_logs + discovered_contracts + 5 tables from events
+	if len(desiredTables) != 7 {
+		t.Errorf("expected 7 tables, got %d", len(desiredTables))
 	}
 
-	for _, table := range []string{"contract_logs", "table1", "table2", "table3", "table4", "table5"} {
+	for _, table := range []string{"contract_logs", "discovered_contracts", "table1", "table2", "table3", "table4", "table5"} {
 		if _, ok := desiredTables[table]; !ok {
 			t.Errorf("missing expected table: %s", table)
 		}
@@ -223,9 +226,9 @@ func TestGetDesiredAndTracked_OnlyViews(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should only have contract_logs
-	if len(desiredTables) != 1 {
-		t.Errorf("expected 1 table (contract_logs), got %d", len(desiredTables))
+	// Should only have contract_logs + discovered_contracts
+	if len(desiredTables) != 2 {
+		t.Errorf("expected 2 tables (contract_logs + discovered_contracts), got %d", len(desiredTables))
 	}
 
 	// Should have 3 views + indexer_health = 4
