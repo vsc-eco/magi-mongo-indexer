@@ -175,6 +175,22 @@ views:
       FROM dex_pool_fee_events
       GROUP BY indexer_contract_id;
 
+  # Fees earned per asset - all time. `asset` is only populated for fee logs
+  # emitted in the 5-field format; legacy rows (asset NULL) are excluded so
+  # the per-asset breakdown stays clean.
+  - name: dex_pool_fees_by_asset
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_by_asset AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        asset,
+        SUM(total_fee) AS total_fees,
+        SUM(magi_fee) AS protocol_fees,
+        SUM(lp_fee) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE asset IS NOT NULL
+      GROUP BY indexer_contract_id, asset;
+
   # Recent swaps (last 100)
   - name: dex_pool_recent_swaps
     sql: |

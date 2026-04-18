@@ -30,6 +30,23 @@ func getNestedValue(data map[string]interface{}, path string) interface{} {
 	return current
 }
 
+// selectCSVFields returns the field map the CSV parser should use for a log
+// split into partCount tokens. If the mapping defines variants, the variant
+// whose FieldCount matches partCount wins; if none matches, nil is returned
+// so the caller can skip the log. If no variants are defined, the top-level
+// Fields map is returned (legacy single-layout behavior).
+func selectCSVFields(mapping types.EventMapping, partCount int) map[string]string {
+	if len(mapping.Variants) == 0 {
+		return mapping.Fields
+	}
+	for _, v := range mapping.Variants {
+		if v.FieldCount == partCount {
+			return v.Fields
+		}
+	}
+	return nil
+}
+
 // ParseLog extracts values from a log string based on the given mapping rules.
 // It supports two parsing strategies depending on mapping.Parse ("json" or "csv").
 // Returns a map where keys are column names defined in the mapping, and values
@@ -77,7 +94,15 @@ func ParseLog(mapping types.EventMapping, logStr string) map[string]interface{} 
 
 		keyDelim := mapping.KeyDelimiter
 
-		for col, idx := range mapping.Fields {
+		// Pick the field layout: a matching variant by token count, or the
+		// top-level Fields if no variants are defined. If variants exist but
+		// none matches the token count, the log is skipped (returns empty).
+		fields := selectCSVFields(mapping, len(parts))
+		if fields == nil {
+			return out
+		}
+
+		for col, idx := range fields {
 			var pos int
 			if _, err := fmt.Sscanf(idx, "%d", &pos); err != nil {
 				continue

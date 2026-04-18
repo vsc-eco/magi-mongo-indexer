@@ -316,6 +316,108 @@ func TestParseLog_CSV_NumericParseError(t *testing.T) {
 	}
 }
 
+func TestParseLog_CSV_Variants_NewFormatMatches(t *testing.T) {
+	// Simulates the DEX fee event gaining an `asset` field at position 1:
+	//   old: fee|t=108|m=27|lp=81        (4 parts)
+	//   new: fee|a=hive|t=108|m=27|lp=81 (5 parts)
+	mapping := types.EventMapping{
+		Parse:        "csv",
+		Delimiter:    "|",
+		KeyDelimiter: "=",
+		Schema: map[string]string{
+			"asset":     "string",
+			"total_fee": "numeric",
+			"magi_fee":  "numeric",
+			"lp_fee":    "numeric",
+		},
+		Variants: []types.EventVariant{
+			{
+				FieldCount: 4,
+				Fields:     map[string]string{"total_fee": "1", "magi_fee": "2", "lp_fee": "3"},
+			},
+			{
+				FieldCount: 5,
+				Fields:     map[string]string{"asset": "1", "total_fee": "2", "magi_fee": "3", "lp_fee": "4"},
+			},
+		},
+	}
+
+	result := ParseLog(mapping, "fee|a=hive|t=108|m=27|lp=81")
+
+	if result["asset"] != "hive" {
+		t.Errorf("expected asset 'hive', got '%v'", result["asset"])
+	}
+	if result["total_fee"] != float64(108) {
+		t.Errorf("expected total_fee 108, got '%v'", result["total_fee"])
+	}
+	if result["magi_fee"] != float64(27) {
+		t.Errorf("expected magi_fee 27, got '%v'", result["magi_fee"])
+	}
+	if result["lp_fee"] != float64(81) {
+		t.Errorf("expected lp_fee 81, got '%v'", result["lp_fee"])
+	}
+}
+
+func TestParseLog_CSV_Variants_LegacyFormatMatches(t *testing.T) {
+	mapping := types.EventMapping{
+		Parse:        "csv",
+		Delimiter:    "|",
+		KeyDelimiter: "=",
+		Schema: map[string]string{
+			"asset":     "string",
+			"total_fee": "numeric",
+			"magi_fee":  "numeric",
+			"lp_fee":    "numeric",
+		},
+		Variants: []types.EventVariant{
+			{
+				FieldCount: 4,
+				Fields:     map[string]string{"total_fee": "1", "magi_fee": "2", "lp_fee": "3"},
+			},
+			{
+				FieldCount: 5,
+				Fields:     map[string]string{"asset": "1", "total_fee": "2", "magi_fee": "3", "lp_fee": "4"},
+			},
+		},
+	}
+
+	result := ParseLog(mapping, "fee|t=33|m=8|lp=25")
+
+	if _, ok := result["asset"]; ok {
+		t.Errorf("expected asset to be absent for legacy variant, got '%v'", result["asset"])
+	}
+	if result["total_fee"] != float64(33) {
+		t.Errorf("expected total_fee 33, got '%v'", result["total_fee"])
+	}
+	if result["magi_fee"] != float64(8) {
+		t.Errorf("expected magi_fee 8, got '%v'", result["magi_fee"])
+	}
+	if result["lp_fee"] != float64(25) {
+		t.Errorf("expected lp_fee 25, got '%v'", result["lp_fee"])
+	}
+}
+
+func TestParseLog_CSV_Variants_NoMatchReturnsEmpty(t *testing.T) {
+	// A log whose part count matches no variant should be skipped (empty result).
+	mapping := types.EventMapping{
+		Parse:     "csv",
+		Delimiter: "|",
+		Schema: map[string]string{
+			"a": "string",
+		},
+		Variants: []types.EventVariant{
+			{FieldCount: 4, Fields: map[string]string{"a": "1"}},
+			{FieldCount: 5, Fields: map[string]string{"a": "2"}},
+		},
+	}
+
+	result := ParseLog(mapping, "fee|x|y") // 3 parts — matches neither
+
+	if len(result) != 0 {
+		t.Errorf("expected empty result for unmatched variant, got %v", result)
+	}
+}
+
 func TestParseLog_CSV_FloatParsing(t *testing.T) {
 	mapping := types.EventMapping{
 		Parse:     "csv",
