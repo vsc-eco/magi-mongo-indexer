@@ -38,12 +38,20 @@ services:
       # User-facing DB connection (read-only user recommended)
       HASURA_GRAPHQL_DATABASE_URL: postgres://gql_reader:readonlypass@postgres:5432/indexerdb
 
-      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"   # Enable web console
-      HASURA_GRAPHQL_DEV_MODE: "true"         # Helpful for hot reload / debugging
+      # review2 CRITICAL #7: secure-by-default. Console, dev-mode (verbose
+      # errors + introspection) and the unauthenticated `public` role are now
+      # opt-in via .env instead of hardcoded on. Defaults reject anonymous
+      # access and hide the console.
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "${HASURA_GRAPHQL_ENABLE_CONSOLE:-false}"
+      HASURA_GRAPHQL_DEV_MODE: "${HASURA_GRAPHQL_DEV_MODE:-false}"
       HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET} # From .env
 
-      # public role
-      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
+      # public role — empty by default = anonymous requests are rejected.
+      # If you set HASURA_GRAPHQL_UNAUTHORIZED_ROLE=public you MUST scope the
+      # `public` role's table/column permissions in Hasura metadata to
+      # exclude sensitive tables (deposit addresses, withdrawal
+      # destinations, balances). See SECURITY.md.
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: "${HASURA_GRAPHQL_UNAUTHORIZED_ROLE:-}"
 
       # cost limits
       HASURA_GRAPHQL_MAX_TOTAL_NODE_LIMIT: "10000"
