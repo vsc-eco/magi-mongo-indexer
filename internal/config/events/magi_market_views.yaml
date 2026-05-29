@@ -1,0 +1,158 @@
+# ================================
+# MAGI MARKET — current-state views (fold raw events → widget tables)
+# ================================
+# Each view folds the create event with its lifecycle events (sold /
+# delisted / cancelled / settled / accepted) into the CURRENT state the
+# @vsc.eco/market-sdk provider browses. `active` is event-derived
+# (remaining>0 AND not delisted/cancelled/settled); on-chain expiry is
+# enforced by the contract, not recomputed here. listing/offer/etc. ids
+# are unique per the contract's monotonic counters.
+# ================================
+
+views:
+
+  - name: magi_market_listings
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_listings AS
+      SELECT
+        l.listing_id, l.seller, l.nft_contract, l.token_id,
+        GREATEST(l.amount - COALESCE(b.bought, 0), 0) AS amount,
+        COALESCE(u.new_price, l.price_per_unit) AS price_per_unit,
+        l.payment_token, l.expiration_block,
+        (COALESCE(b.bought, 0) < l.amount AND d.listing_id IS NULL) AS active,
+        l.indexer_contract_id, l.indexer_block_height, l.indexer_ts
+      FROM magi_market_listed_events l
+      LEFT JOIN (SELECT listing_id, SUM(amount) AS bought FROM magi_market_bought_events GROUP BY listing_id) b
+        ON b.listing_id = l.listing_id
+      LEFT JOIN (SELECT DISTINCT listing_id FROM magi_market_delisted_events) d
+        ON d.listing_id = l.listing_id
+      LEFT JOIN (SELECT DISTINCT ON (listing_id) listing_id, new_price
+                 FROM magi_market_listing_updated_events
+                 ORDER BY listing_id, indexer_block_height DESC) u
+        ON u.listing_id = l.listing_id;
+
+  - name: magi_market_offers
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_offers AS
+      SELECT
+        o.offer_id, o.buyer, o.nft_contract, o.token_id,
+        GREATEST(o.amount - COALESCE(a.acc, 0), 0) AS amount,
+        o.price_per_unit, o.payment_token, o.expiration_block, o.is_collection,
+        (COALESCE(a.acc, 0) < o.amount AND c.offer_id IS NULL) AS active,
+        o.indexer_contract_id, o.indexer_block_height, o.indexer_ts
+      FROM magi_market_offer_made_events o
+      LEFT JOIN (SELECT offer_id, SUM(amount) AS acc FROM magi_market_offer_accepted_events GROUP BY offer_id) a
+        ON a.offer_id = o.offer_id
+      LEFT JOIN (SELECT DISTINCT offer_id FROM magi_market_offer_cancelled_events) c
+        ON c.offer_id = o.offer_id;
+
+  - name: magi_market_auctions
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_auctions AS
+      SELECT
+        ac.auction_id, ac.seller, ac.nft_contract, ac.token_id, ac.amount,
+        ac.auction_type, ac.start_price, ac.end_price, ac.start_block, ac.end_block,
+        bp.bidder AS high_bidder, bp.bid_amount AS high_bid,
+        (s.auction_id IS NOT NULL) AS settled,
+        (s.auction_id IS NULL AND x.auction_id IS NULL) AS active,
+        ac.indexer_contract_id, ac.indexer_block_height, ac.indexer_ts
+      FROM magi_market_auction_created_events ac
+      LEFT JOIN (SELECT DISTINCT ON (auction_id) auction_id, bidder, bid_amount
+                 FROM magi_market_bid_placed_events
+                 ORDER BY auction_id, indexer_block_height DESC) bp
+        ON bp.auction_id = ac.auction_id
+      LEFT JOIN (SELECT DISTINCT auction_id FROM magi_market_auction_settled_events) s
+        ON s.auction_id = ac.auction_id
+      LEFT JOIN (SELECT DISTINCT auction_id FROM magi_market_auction_cancelled_events) x
+        ON x.auction_id = ac.auction_id;
+
+  - name: magi_market_bundles
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_bundles AS
+      SELECT
+        bl.bundle_id, bl.seller, bl.nft_contract, bl.count, bl.price,
+        (bb.bundle_id IS NULL AND bd.bundle_id IS NULL) AS active,
+        bl.indexer_contract_id, bl.indexer_block_height, bl.indexer_ts
+      FROM magi_market_bundle_listed_events bl
+      LEFT JOIN (SELECT DISTINCT bundle_id FROM magi_market_bundle_bought_events) bb
+        ON bb.bundle_id = bl.bundle_id
+      LEFT JOIN (SELECT DISTINCT bundle_id FROM magi_market_bundle_delisted_events) bd
+        ON bd.bundle_id = bl.bundle_id;
+
+  - name: magi_market_swaps
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_swaps AS
+      SELECT
+        p.swap_id, p.proposer, p.offered_nft, p.wanted_nft,
+        (a.swap_id IS NULL AND c.swap_id IS NULL) AS active,
+        p.indexer_contract_id, p.indexer_block_height, p.indexer_ts
+      FROM magi_market_swap_proposed_events p
+      LEFT JOIN (SELECT DISTINCT swap_id FROM magi_market_swap_accepted_events) a
+        ON a.swap_id = p.swap_id
+      LEFT JOIN (SELECT DISTINCT swap_id FROM magi_market_swap_cancelled_events) c
+        ON c.swap_id = p.swap_id;
+
+  - name: magi_market_rentals
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_rentals AS
+      SELECT
+        r.rental_id, r.owner, r.nft_contract, r.token_id,
+        rt.renter, rt.until AS end_block,
+        (rd.rental_id IS NULL) AS active,
+        r.indexer_contract_id, r.indexer_block_height, r.indexer_ts
+      FROM magi_market_rental_listed_events r
+      LEFT JOIN (SELECT DISTINCT ON (rental_id) rental_id, renter, until
+                 FROM magi_market_rented_events
+                 ORDER BY rental_id, indexer_block_height DESC) rt
+        ON rt.rental_id = r.rental_id
+      LEFT JOIN (SELECT DISTINCT rental_id FROM magi_market_rental_delisted_events) rd
+        ON rd.rental_id = r.rental_id;
+
+  - name: magi_market_mint_spots
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_mint_spots AS
+      SELECT
+        ml.listing_id, ml.lister, ml.nft_contract, ml.token_id, ml.max_spots,
+        COALESCE(mb.sold, 0) AS sold,
+        ((ml.max_spots = 0 OR COALESCE(mb.sold, 0) < ml.max_spots) AND md.listing_id IS NULL) AS active,
+        ml.indexer_contract_id, ml.indexer_block_height, ml.indexer_ts
+      FROM magi_market_mint_spots_listed_events ml
+      LEFT JOIN (SELECT listing_id, SUM(amount) AS sold FROM magi_market_mint_spot_bought_events GROUP BY listing_id) mb
+        ON mb.listing_id = ml.listing_id
+      LEFT JOIN (SELECT DISTINCT listing_id FROM magi_market_mint_spots_delisted_events) md
+        ON md.listing_id = ml.listing_id;
+
+  - name: magi_market_token_listings
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_token_listings AS
+      SELECT
+        tl.listing_id, tl.seller, tl.token_contract,
+        GREATEST(tl.amount::numeric - COALESCE(b.bought, 0), 0)::text AS amount,
+        tl.price_per_unit, tl.payment_token, tl.expiration_block,
+        (COALESCE(b.bought, 0) < tl.amount::numeric AND d.listing_id IS NULL) AS active,
+        tl.indexer_contract_id, tl.indexer_block_height, tl.indexer_ts
+      FROM magi_market_token_listed_events tl
+      LEFT JOIN (SELECT listing_id, SUM(amount::numeric) AS bought FROM magi_market_token_bought_events GROUP BY listing_id) b
+        ON b.listing_id = tl.listing_id
+      LEFT JOIN (SELECT DISTINCT listing_id FROM magi_market_token_delisted_events) d
+        ON d.listing_id = tl.listing_id;
+
+  # Current payment-token whitelist: one row per token whose MOST RECENT
+  # add/remove event was an add (active=true) or remove (active=false). The
+  # widget/SDK filters active=true. Native HIVE/HBD are seeded in the
+  # contract's init without an event, so they're handled statically by the
+  # widget (NATIVE) and intentionally not folded here.
+  - name: magi_market_payment_tokens
+    sql: |
+      CREATE OR REPLACE VIEW magi_market_payment_tokens AS
+      SELECT DISTINCT ON (token)
+        token, added AS active,
+        indexer_contract_id, indexer_block_height, indexer_ts
+      FROM (
+        SELECT token, indexer_contract_id, indexer_block_height, indexer_ts, true AS added
+          FROM magi_market_payment_token_added_events
+        UNION ALL
+        SELECT token, indexer_contract_id, indexer_block_height, indexer_ts, false AS added
+          FROM magi_market_payment_token_removed_events
+      ) ev
+      ORDER BY token, indexer_block_height DESC, added DESC;

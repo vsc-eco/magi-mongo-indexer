@@ -1,0 +1,198 @@
+# ===============================
+# MAGI MARKET — event → table mappings (ERC-1155 NFT marketplace + ERC-20 token sales)
+# ===============================
+# Contract: vsc1BnMAaeUzhzVcfKMDG5vphthhymk6irjLNq (vsc-testnet)
+# Events are JSON: {"type":"<t>","attributes":{...},"tx":"<id>"} — parse: json,
+# fields use $.attributes.<key>. The indexer auto-adds indexer_contract_id /
+# indexer_block_height / indexer_ts / indexer_tx_hash to every row.
+# The magi_market_* fold views (magi_market_views.yaml) compute current
+# state from these raw event tables (à la magi_nft_balances).
+# ===============================
+
+contracts:
+  - address: "vsc1BnMAaeUzhzVcfKMDG5vphthhymk6irjLNq"
+    fromBlockHeight: 3168000
+    events:
+
+      # ---- fixed-price NFT listings ----
+      - log_type: "listed"
+        table: "magi_market_listed_events"
+        schema: { listing_id: numeric, seller: string, nft_contract: string, token_id: string, amount: numeric, price_per_unit: string, payment_token: string, expiration_block: numeric }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", seller: "$.attributes.seller", nft_contract: "$.attributes.nftContract", token_id: "$.attributes.tokenId", amount: "$.attributes.amount", price_per_unit: "$.attributes.pricePerUnit", payment_token: "$.attributes.paymentToken", expiration_block: "$.attributes.expirationBlock" }
+
+      - log_type: "delisted"
+        table: "magi_market_delisted_events"
+        schema: { listing_id: numeric, seller: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", seller: "$.attributes.seller" }
+
+      - log_type: "bought"
+        table: "magi_market_bought_events"
+        schema: { listing_id: numeric, buyer: string, amount: numeric, total_price: string, fee: string, royalty: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", buyer: "$.attributes.buyer", amount: "$.attributes.amount", total_price: "$.attributes.totalPrice", fee: "$.attributes.fee", royalty: "$.attributes.royalty" }
+
+      - log_type: "listing_updated"
+        table: "magi_market_listing_updated_events"
+        schema: { listing_id: numeric, new_price: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", new_price: "$.attributes.newPrice" }
+
+      # ---- offers ----
+      - log_type: "offer_made"
+        table: "magi_market_offer_made_events"
+        schema: { offer_id: numeric, buyer: string, nft_contract: string, token_id: string, amount: numeric, price_per_unit: string, payment_token: string, expiration_block: numeric, is_collection: boolean }
+        parse: "json"
+        fields: { offer_id: "$.attributes.offerId", buyer: "$.attributes.buyer", nft_contract: "$.attributes.nftContract", token_id: "$.attributes.tokenId", amount: "$.attributes.amount", price_per_unit: "$.attributes.pricePerUnit", payment_token: "$.attributes.paymentToken", expiration_block: "$.attributes.expirationBlock", is_collection: "$.attributes.isCollection" }
+
+      - log_type: "offer_cancelled"
+        table: "magi_market_offer_cancelled_events"
+        schema: { offer_id: numeric, buyer: string }
+        parse: "json"
+        fields: { offer_id: "$.attributes.offerId", buyer: "$.attributes.buyer" }
+
+      - log_type: "offer_accepted"
+        table: "magi_market_offer_accepted_events"
+        schema: { offer_id: numeric, seller: string, buyer: string, amount: numeric, total_price: string, fee: string, royalty: string, token_id: string }
+        parse: "json"
+        fields: { offer_id: "$.attributes.offerId", seller: "$.attributes.seller", buyer: "$.attributes.buyer", amount: "$.attributes.amount", total_price: "$.attributes.totalPrice", fee: "$.attributes.fee", royalty: "$.attributes.royalty", token_id: "$.attributes.tokenId" }
+
+      # ---- auctions ----
+      - log_type: "auction_created"
+        table: "magi_market_auction_created_events"
+        schema: { auction_id: numeric, seller: string, nft_contract: string, token_id: string, amount: numeric, auction_type: string, start_price: string, end_price: string, start_block: numeric, end_block: numeric }
+        parse: "json"
+        fields: { auction_id: "$.attributes.auctionId", seller: "$.attributes.seller", nft_contract: "$.attributes.nftContract", token_id: "$.attributes.tokenId", amount: "$.attributes.amount", auction_type: "$.attributes.auctionType", start_price: "$.attributes.startPrice", end_price: "$.attributes.endPrice", start_block: "$.attributes.startBlock", end_block: "$.attributes.endBlock" }
+
+      - log_type: "bid_placed"
+        table: "magi_market_bid_placed_events"
+        schema: { auction_id: numeric, bidder: string, bid_amount: string }
+        parse: "json"
+        fields: { auction_id: "$.attributes.auctionId", bidder: "$.attributes.bidder", bid_amount: "$.attributes.bidAmount" }
+
+      - log_type: "auction_settled"
+        table: "magi_market_auction_settled_events"
+        schema: { auction_id: numeric, winner: string, final_price: string, fee: string, royalty: string }
+        parse: "json"
+        fields: { auction_id: "$.attributes.auctionId", winner: "$.attributes.winner", final_price: "$.attributes.finalPrice", fee: "$.attributes.fee", royalty: "$.attributes.royalty" }
+
+      - log_type: "auction_cancelled"
+        table: "magi_market_auction_cancelled_events"
+        schema: { auction_id: numeric, seller: string }
+        parse: "json"
+        fields: { auction_id: "$.attributes.auctionId", seller: "$.attributes.seller" }
+
+      # ---- bundles ----
+      - log_type: "bundle_listed"
+        table: "magi_market_bundle_listed_events"
+        schema: { bundle_id: numeric, seller: string, nft_contract: string, count: numeric, price: string }
+        parse: "json"
+        fields: { bundle_id: "$.attributes.bundleId", seller: "$.attributes.seller", nft_contract: "$.attributes.nftContract", count: "$.attributes.count", price: "$.attributes.price" }
+
+      - log_type: "bundle_bought"
+        table: "magi_market_bundle_bought_events"
+        schema: { bundle_id: numeric, buyer: string, total_price: string, fee: string, royalty: string }
+        parse: "json"
+        fields: { bundle_id: "$.attributes.bundleId", buyer: "$.attributes.buyer", total_price: "$.attributes.totalPrice", fee: "$.attributes.fee", royalty: "$.attributes.royalty" }
+
+      - log_type: "bundle_delisted"
+        table: "magi_market_bundle_delisted_events"
+        schema: { bundle_id: numeric, seller: string }
+        parse: "json"
+        fields: { bundle_id: "$.attributes.bundleId", seller: "$.attributes.seller" }
+
+      # ---- NFT-for-NFT swaps ----
+      - log_type: "swapProposed"
+        table: "magi_market_swap_proposed_events"
+        schema: { swap_id: numeric, proposer: string, offered_nft: string, wanted_nft: string }
+        parse: "json"
+        fields: { swap_id: "$.attributes.swapId", proposer: "$.attributes.proposer", offered_nft: "$.attributes.offeredNft", wanted_nft: "$.attributes.wantedNft" }
+
+      - log_type: "swapAccepted"
+        table: "magi_market_swap_accepted_events"
+        schema: { swap_id: numeric, proposer: string, acceptor: string }
+        parse: "json"
+        fields: { swap_id: "$.attributes.swapId", proposer: "$.attributes.proposer", acceptor: "$.attributes.acceptor" }
+
+      - log_type: "swapCancelled"
+        table: "magi_market_swap_cancelled_events"
+        schema: { swap_id: numeric, by: string }
+        parse: "json"
+        fields: { swap_id: "$.attributes.swapId", by: "$.attributes.by" }
+
+      # ---- rentals ----
+      - log_type: "rentalListed"
+        table: "magi_market_rental_listed_events"
+        schema: { rental_id: numeric, owner: string, nft_contract: string, token_id: string }
+        parse: "json"
+        fields: { rental_id: "$.attributes.rentalId", owner: "$.attributes.owner", nft_contract: "$.attributes.nftContract", token_id: "$.attributes.tokenId" }
+
+      - log_type: "rented"
+        table: "magi_market_rented_events"
+        schema: { rental_id: numeric, renter: string, until: numeric }
+        parse: "json"
+        fields: { rental_id: "$.attributes.rentalId", renter: "$.attributes.renter", until: "$.attributes.until" }
+
+      - log_type: "rentalEnded"
+        table: "magi_market_rental_ended_events"
+        schema: { rental_id: numeric, by: string }
+        parse: "json"
+        fields: { rental_id: "$.attributes.rentalId", by: "$.attributes.by" }
+
+      - log_type: "rentalDelisted"
+        table: "magi_market_rental_delisted_events"
+        schema: { rental_id: numeric, owner: string }
+        parse: "json"
+        fields: { rental_id: "$.attributes.rentalId", owner: "$.attributes.owner" }
+
+      # ---- primary-sale mint spots ----
+      - log_type: "mint_spots_listed"
+        table: "magi_market_mint_spots_listed_events"
+        schema: { listing_id: numeric, lister: string, nft_contract: string, token_id: string, max_spots: numeric }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", lister: "$.attributes.lister", nft_contract: "$.attributes.nftContract", token_id: "$.attributes.tokenId", max_spots: "$.attributes.maxSpots" }
+
+      - log_type: "mint_spot_bought"
+        table: "magi_market_mint_spot_bought_events"
+        schema: { listing_id: numeric, buyer: string, amount: numeric, received: string, fee: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", buyer: "$.attributes.buyer", amount: "$.attributes.amount", received: "$.attributes.received", fee: "$.attributes.fee" }
+
+      - log_type: "mint_spots_delisted"
+        table: "magi_market_mint_spots_delisted_events"
+        schema: { listing_id: numeric, lister: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", lister: "$.attributes.lister" }
+
+      # ---- fixed-price ERC-20 token-contract sales ----
+      - log_type: "token_listed"
+        table: "magi_market_token_listed_events"
+        schema: { listing_id: numeric, seller: string, token_contract: string, amount: string, price_per_unit: string, payment_token: string, expiration_block: numeric }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", seller: "$.attributes.seller", token_contract: "$.attributes.tokenContract", amount: "$.attributes.amount", price_per_unit: "$.attributes.pricePerUnit", payment_token: "$.attributes.paymentToken", expiration_block: "$.attributes.expirationBlock" }
+
+      - log_type: "token_bought"
+        table: "magi_market_token_bought_events"
+        schema: { listing_id: numeric, buyer: string, amount: string, total_price: string, fee: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", buyer: "$.attributes.buyer", amount: "$.attributes.amount", total_price: "$.attributes.totalPrice", fee: "$.attributes.fee" }
+
+      - log_type: "token_delisted"
+        table: "magi_market_token_delisted_events"
+        schema: { listing_id: numeric, seller: string }
+        parse: "json"
+        fields: { listing_id: "$.attributes.listingId", seller: "$.attributes.seller" }
+
+      # ---- payment-token whitelist (folded into magi_market_payment_tokens) ----
+      - log_type: "payment_token_added"
+        table: "magi_market_payment_token_added_events"
+        schema: { token: string }
+        parse: "json"
+        fields: { token: "$.attributes.token" }
+
+      - log_type: "payment_token_removed"
+        table: "magi_market_payment_token_removed_events"
+        schema: { token: string }
+        parse: "json"
+        fields: { token: "$.attributes.token" }
