@@ -231,6 +231,54 @@ views:
       WHERE asset IS NOT NULL
       GROUP BY indexer_contract_id, asset;
 
+  # Fees earned per asset, windowed (24h / 7d / 30d).
+  #
+  # The non-asset views (dex_pool_fees_24h/7d/30d) SUM fees across BOTH pool
+  # assets into one number — which mixes decimals (e.g. BTC 8dp + HBD 3dp) and
+  # is not a usable currency figure. These views keep `asset` in the GROUP BY so
+  # each row is a single asset that a consumer can scale by its own decimals and
+  # price. Same COALESCE derivation as the all-time per-asset view; legacy
+  # 4-field rows (asset NULL) are excluded. Prefer these over the non-asset
+  # windowed views for any displayed total.
+  - name: dex_pool_fees_by_asset_24h
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_by_asset_24h AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        asset,
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '24 hours'
+      GROUP BY indexer_contract_id, asset;
+
+  - name: dex_pool_fees_by_asset_7d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_by_asset_7d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        asset,
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '7 days'
+      GROUP BY indexer_contract_id, asset;
+
+  - name: dex_pool_fees_by_asset_30d
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_fees_by_asset_30d AS
+      SELECT
+        indexer_contract_id AS pool_contract,
+        asset,
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+      FROM dex_pool_fee_events
+      WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '30 days'
+      GROUP BY indexer_contract_id, asset;
+
   # Pendulum stabilizer telemetry - all time. Only the pendulum (8-field) fee
   # layout populates these. node_bucket_hbd is HBD that swaps on this pool fed
   # into the network node bucket (post-conversion), kept separate from the
