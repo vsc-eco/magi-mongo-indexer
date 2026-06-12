@@ -397,6 +397,64 @@ func TestParseLog_CSV_Variants_LegacyFormatMatches(t *testing.T) {
 	}
 }
 
+func TestParseLog_CSV_Variants_PendulumFormatMatches(t *testing.T) {
+	// The pendulum DEX fee log carries the full output-side fee breakdown:
+	//   fee|a=hive|lp=81|ns=20|nc=7|nb=27|m=10000|s=9800   (8 parts)
+	// total_fee/magi_fee are not emitted; the dex_pool views derive them.
+	mapping := types.EventMapping{
+		Parse:        "csv",
+		Delimiter:    "|",
+		KeyDelimiter: "=",
+		Schema: map[string]string{
+			"total_fee":       "numeric",
+			"magi_fee":        "numeric",
+			"lp_fee":          "numeric",
+			"asset":           "string",
+			"node_share":      "numeric",
+			"network_credit":  "numeric",
+			"node_bucket_hbd": "numeric",
+			"multiplier_bps":  "numeric",
+			"s_bps":           "numeric",
+		},
+		Variants: []types.EventVariant{
+			{FieldCount: 4, Fields: map[string]string{"total_fee": "1", "magi_fee": "2", "lp_fee": "3"}},
+			{FieldCount: 5, Fields: map[string]string{"asset": "1", "total_fee": "2", "magi_fee": "3", "lp_fee": "4"}},
+			{FieldCount: 8, Fields: map[string]string{"asset": "1", "lp_fee": "2", "node_share": "3", "network_credit": "4", "node_bucket_hbd": "5", "multiplier_bps": "6", "s_bps": "7"}},
+		},
+	}
+
+	result := ParseLog(mapping, "fee|a=hive|lp=81|ns=20|nc=7|nb=27|m=10000|s=9800")
+
+	if result["asset"] != "hive" {
+		t.Errorf("expected asset hive, got '%v'", result["asset"])
+	}
+	if result["lp_fee"] != float64(81) {
+		t.Errorf("expected lp_fee 81, got '%v'", result["lp_fee"])
+	}
+	if result["node_share"] != float64(20) {
+		t.Errorf("expected node_share 20, got '%v'", result["node_share"])
+	}
+	if result["network_credit"] != float64(7) {
+		t.Errorf("expected network_credit 7, got '%v'", result["network_credit"])
+	}
+	if result["node_bucket_hbd"] != float64(27) {
+		t.Errorf("expected node_bucket_hbd 27, got '%v'", result["node_bucket_hbd"])
+	}
+	if result["multiplier_bps"] != float64(10000) {
+		t.Errorf("expected multiplier_bps 10000, got '%v'", result["multiplier_bps"])
+	}
+	if result["s_bps"] != float64(9800) {
+		t.Errorf("expected s_bps 9800, got '%v'", result["s_bps"])
+	}
+	// total_fee/magi_fee are not present in the pendulum layout.
+	if _, ok := result["total_fee"]; ok {
+		t.Errorf("expected total_fee absent for pendulum variant, got '%v'", result["total_fee"])
+	}
+	if _, ok := result["magi_fee"]; ok {
+		t.Errorf("expected magi_fee absent for pendulum variant, got '%v'", result["magi_fee"])
+	}
+}
+
 func TestParseLog_CSV_Variants_NoMatchReturnsEmpty(t *testing.T) {
 	// A log whose part count matches no variant should be skipped (empty result).
 	mapping := types.EventMapping{

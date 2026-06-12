@@ -48,11 +48,32 @@ contracts:
 
       # Fee Events (emitted alongside swaps)
       #
-      # The fee log gained an `asset` field at position 1. Both layouts must
-      # remain indexable so fresh indexers can replay the full history.
-      #   legacy (4 parts): fee|t=108|m=27|lp=81
-      #   current (5 parts): fee|a=hive|t=108|m=27|lp=81
-      # For legacy rows, `asset` stays NULL.
+      # The fee log has evolved through three on-chain layouts; all must stay
+      # indexable so a fresh indexer can replay the full history. Tokens are
+      # "|"-separated, key/value split on "=", positions 1-indexed after the
+      # "fee" prefix. The variant is chosen by token count, so the layouts
+      # coexist without ambiguity.
+      #
+      #   legacy   (4 parts): fee|t=108|m=27|lp=81
+      #   v1-asset (5 parts): fee|a=hive|t=108|m=27|lp=81
+      #   pendulum (8 parts): fee|a=hive|lp=81|ns=20|nc=7|nb=27|m=10000|s=9800
+      #
+      # The pendulum layout (dex-contracts commit 52ab2a4 "use new pendulum sdk
+      # method", live on origin/main) replaced the single magi_fee with the full
+      # breakdown emitted by logPendulumSwap. Keys (all output-asset base units
+      # except nb):
+      #   a  = output asset (the fee is denominated in this asset)
+      #   lp = LP-retained fee share        (stays in the pool reserve)
+      #   ns = node fee share, pre-convert  (leaves the pool reserve)
+      #   nc = network-share credit         (leaves the pool reserve)
+      #   nb = node bucket credited         (HBD base units, post-conversion)
+      #   m  = stabilizer multiplier        (bps, 1e4-scaled)
+      #   s  = geometry ratio s = V/E       (bps, 1e4-scaled)
+      # The pendulum layout does not emit total_fee/magi_fee; the dex_pool views
+      # derive them (total = lp+ns+nc, protocol/magi = ns+nc). So per row:
+      #   legacy 4-part  -> total_fee/magi_fee/lp_fee set, asset + new cols NULL
+      #   v1-asset 5-part-> total_fee/magi_fee/lp_fee/asset set, new cols NULL
+      #   pendulum 8-part-> asset/lp_fee/ns/nc/nb/m/s set, total_fee/magi_fee NULL
       - log_type: "fee"
         table: "dex_pool_fee_events"
         schema:
@@ -60,6 +81,11 @@ contracts:
           magi_fee: numeric
           lp_fee: numeric
           asset: string
+          node_share: numeric
+          network_credit: numeric
+          node_bucket_hbd: numeric
+          multiplier_bps: numeric
+          s_bps: numeric
         parse: "csv"
         delimiter: "|"
         key_delimiter: "="
@@ -75,6 +101,16 @@ contracts:
               total_fee: "2"
               magi_fee: "3"
               lp_fee: "4"
+          # Pendulum breakdown — see the header comment above.
+          - field_count: 8
+            fields:
+              asset: "1"
+              lp_fee: "2"
+              node_share: "3"
+              network_credit: "4"
+              node_bucket_hbd: "5"
+              multiplier_bps: "6"
+              s_bps: "7"
 
       # Add Liquidity Events
       - log_type: "add_liq"

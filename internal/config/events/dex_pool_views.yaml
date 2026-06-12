@@ -20,20 +20,29 @@ views:
   # - protocol-fee drain).
   #
   # Contract accounting (see dex-contracts contracts/dex/main.go):
-  #   newRIn  = rIn + amountIn              -- entire input enters the pool
-  #   newROut = rOut - grossOut + lpFee     -- lpFee stays, magiFee leaves
+  #   newRIn  = rIn + amountIn                   -- entire input enters the pool
+  #   newROut = rOut - grossOut + lp             -- lp stays, ns+nc leave
   # So per swap the reserve changes are:
   #   delta(asset_in)  = + amount_in
-  #   delta(asset_out) = - (amount_out + magi_fee)
-  # The `amount_out` emitted on the swap event is already the NET amount the
-  # recipient receives (grossOut - baseFee - clpFee). The only piece the
-  # view was missing was the `magi_fee` portion that permanently leaves the
-  # pool to the protocol treasury. Subtracting it per asset here brings the
-  # view back into exact agreement with on-chain `r0`/`r1`.
+  #   delta(asset_out) = - (amount_out + protocol_drain)
+  # where protocol_drain is the output-asset fee that permanently leaves the
+  # pool. The `amount_out` on the swap event is already the NET amount the
+  # recipient receives; the view subtracts the drain per asset to stay in exact
+  # agreement with on-chain `r0`/`r1`.
   #
-  # Only the 5-field fee log format carries `asset` - legacy 4-field rows
-  # have `asset IS NULL` and are ignored in the magi-fee drain (pools with
-  # only legacy history still drift, but no worse than before this fix).
+  # protocol_drain depends on the fee log layout (see dex_pool_mappings.yaml):
+  #   legacy/v1 fee log -> magi_fee
+  #   pendulum  fee log -> node_share + network_credit (ns + nc); the LP share
+  #                        stays in the pool and the HBD node bucket (nb) is a
+  #                        different asset, so neither drains the reserve here.
+  # COALESCE picks magi_fee when present, else the pendulum ns+nc sum.
+  #
+  # Only fee logs that carry `asset` participate: legacy 4-field rows have
+  # `asset IS NULL` and are ignored (pools with only legacy history still
+  # drift, but no worse than before). The pendulum layout always carries asset.
+  # Note: referral payouts are not separately logged, so swaps that route a
+  # ref_bps cut to a beneficiary still slightly over-state the output reserve
+  # (pre-existing, unrelated to the fee-layout change).
   - name: dex_pool_liquidity
     sql: |
       CREATE OR REPLACE VIEW dex_pool_liquidity AS
@@ -63,8 +72,8 @@ views:
       magi_fee_drain AS (
         SELECT
           f.indexer_contract_id,
-          SUM(CASE WHEN f.asset = p.asset0 THEN f.magi_fee ELSE 0 END) AS magi0,
-          SUM(CASE WHEN f.asset = p.asset1 THEN f.magi_fee ELSE 0 END) AS magi1
+          SUM(CASE WHEN f.asset = p.asset0 THEN COALESCE(f.magi_fee, COALESCE(f.node_share, 0) + COALESCE(f.network_credit, 0)) ELSE 0 END) AS magi0,
+          SUM(CASE WHEN f.asset = p.asset1 THEN COALESCE(f.magi_fee, COALESCE(f.node_share, 0) + COALESCE(f.network_credit, 0)) ELSE 0 END) AS magi1
         FROM dex_pool_fee_events f
         JOIN pool_assets p ON f.indexer_contract_id = p.indexer_contract_id
         WHERE f.asset IS NOT NULL
@@ -160,9 +169,9 @@ views:
       CREATE OR REPLACE VIEW dex_pool_fees_24h AS
       SELECT
         indexer_contract_id AS pool_contract,
-        SUM(total_fee) AS total_fees,
-        SUM(magi_fee) AS protocol_fees,
-        SUM(lp_fee) AS lp_fees
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE indexer_ts > NOW() - INTERVAL '24 hours'
       GROUP BY indexer_contract_id;
@@ -173,9 +182,9 @@ views:
       CREATE OR REPLACE VIEW dex_pool_fees_7d AS
       SELECT
         indexer_contract_id AS pool_contract,
-        SUM(total_fee) AS total_fees,
-        SUM(magi_fee) AS protocol_fees,
-        SUM(lp_fee) AS lp_fees
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE indexer_ts > NOW() - INTERVAL '7 days'
       GROUP BY indexer_contract_id;
@@ -186,9 +195,9 @@ views:
       CREATE OR REPLACE VIEW dex_pool_fees_30d AS
       SELECT
         indexer_contract_id AS pool_contract,
-        SUM(total_fee) AS total_fees,
-        SUM(magi_fee) AS protocol_fees,
-        SUM(lp_fee) AS lp_fees
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE indexer_ts > NOW() - INTERVAL '30 days'
       GROUP BY indexer_contract_id;
@@ -199,27 +208,59 @@ views:
       CREATE OR REPLACE VIEW dex_pool_fees_all AS
       SELECT
         indexer_contract_id AS pool_contract,
-        SUM(total_fee) AS total_fees,
-        SUM(magi_fee) AS protocol_fees,
-        SUM(lp_fee) AS lp_fees
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       GROUP BY indexer_contract_id;
 
-  # Fees earned per asset - all time. `asset` is only populated for fee logs
-  # emitted in the 5-field format; legacy rows (asset NULL) are excluded so
-  # the per-asset breakdown stays clean.
+  # Fees earned per asset - all time. `asset` is populated for the v1-asset
+  # (5-field) and pendulum (8-field) fee layouts; legacy 4-field rows (asset
+  # NULL) are excluded so the per-asset breakdown stays clean. total/protocol
+  # fees are derived the same way as the time-window views (see above).
   - name: dex_pool_fees_by_asset
     sql: |
       CREATE OR REPLACE VIEW dex_pool_fees_by_asset AS
       SELECT
         indexer_contract_id AS pool_contract,
         asset,
-        SUM(total_fee) AS total_fees,
-        SUM(magi_fee) AS protocol_fees,
-        SUM(lp_fee) AS lp_fees
+        SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
+        SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL
       GROUP BY indexer_contract_id, asset;
+
+  # Pendulum stabilizer telemetry - all time. Only the pendulum (8-field) fee
+  # layout populates these. node_bucket_hbd is HBD that swaps on this pool fed
+  # into the network node bucket (post-conversion), kept separate from the
+  # asset-denominated fee views above to avoid mixing units. The latest m/s
+  # snapshot exposes the most recent stabilizer multiplier and geometry ratio
+  # (both bps, 1e4-scaled) seen for the pool.
+  - name: dex_pool_pendulum_stats
+    sql: |
+      CREATE OR REPLACE VIEW dex_pool_pendulum_stats AS
+      WITH latest AS (
+        SELECT DISTINCT ON (indexer_contract_id)
+          indexer_contract_id,
+          multiplier_bps,
+          s_bps,
+          indexer_block_height
+        FROM dex_pool_fee_events
+        WHERE multiplier_bps IS NOT NULL
+        ORDER BY indexer_contract_id, indexer_block_height DESC
+      )
+      SELECT
+        f.indexer_contract_id AS pool_contract,
+        SUM(COALESCE(f.node_bucket_hbd, 0)) AS node_bucket_hbd_total,
+        SUM(COALESCE(f.node_share, 0)) AS node_share_total,
+        SUM(COALESCE(f.network_credit, 0)) AS network_credit_total,
+        l.multiplier_bps AS last_multiplier_bps,
+        l.s_bps AS last_s_bps
+      FROM dex_pool_fee_events f
+      JOIN latest l ON f.indexer_contract_id = l.indexer_contract_id
+      WHERE f.node_bucket_hbd IS NOT NULL
+      GROUP BY f.indexer_contract_id, l.multiplier_bps, l.s_bps;
 
   # Recent swaps (last 100)
   - name: dex_pool_recent_swaps
