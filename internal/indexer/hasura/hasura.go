@@ -118,7 +118,10 @@ func dropInconsistentMetadata(url, adminSecret string) error {
 }
 
 // SyncHasuraTablesAndViews ensures Hasura tracks only the tables and views
-// defined in mappings.yaml and views.yaml (plus contract_logs).
+// defined in mappings.yaml and views.yaml (plus contract_logs). After
+// reconciling the tracked set it reloads the source schema so column changes
+// to already-tracked tables/views (e.g. columns added via CREATE OR REPLACE
+// VIEW) propagate to the GraphQL schema without any manual re-tracking.
 func SyncHasuraTablesAndViews(mappings *types.MappingFile, views *types.ViewsFile, cfg config.Config) error {
 	return syncHasuraInternal(mappings, views, true, cfg)
 }
@@ -202,6 +205,20 @@ func syncHasuraInternal(mappings *types.MappingFile, views *types.ViewsFile, all
 			}
 			log.Printf("[hasura] untracked removed view: %s", v)
 		}
+	}
+
+	// Tracking above only acts on brand-new tables/views; Hasura snapshots a
+	// table/view's column set when it is first tracked and never revisits it.
+	// So columns added to an already-tracked view (e.g. via CREATE OR REPLACE
+	// VIEW on hot-reload) stay invisible to GraphQL until the source schema is
+	// reloaded. Do that here so the refresh is automatic for every operator and
+	// no manual re-track is ever required. Best-effort: tracking already
+	// succeeded, and the indexer's core job does not depend on this — a transient
+	// Hasura failure should warn, not abort startup.
+	if err := reloadMetadata(hasuraURL, adminSecret, cfg.HasuraSource); err != nil {
+		log.Printf("[hasura] warning: reload_metadata failed; column changes on already-tracked views may not appear until the next reload: %v", err)
+	} else {
+		log.Printf("[hasura] reloaded source %q schema (picks up column changes on existing views)", cfg.HasuraSource)
 	}
 	return nil
 }
@@ -296,6 +313,22 @@ func trackTable(url, secret, name string, hasuraSource string) error {
 				"schema": "public",
 				"name":   name,
 			},
+		},
+	})
+	_, err := HasuraMetadataRequest(url, secret, payload)
+	return err
+}
+
+// reloadMetadata forces Hasura to re-introspect the given source's database
+// schema. Unlike pg_track_table (one-shot at first track), this refreshes the
+// column set of already-tracked tables/views, so columns added via CREATE OR
+// REPLACE VIEW become queryable without untrack/re-track. Scoped to the single
+// configured source to avoid touching unrelated remote schemas/sources.
+func reloadMetadata(url, secret, hasuraSource string) error {
+	payload, _ := json.Marshal(map[string]any{
+		"type": "reload_metadata",
+		"args": map[string]any{
+			"reload_sources": []string{hasuraSource},
 		},
 	})
 	_, err := HasuraMetadataRequest(url, secret, payload)
