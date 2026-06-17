@@ -226,6 +226,14 @@ views:
   # All four (total/protocol/node/network/lp) are in output-asset base units.
   # The HBD node bucket (nb) is NOT here (different denomination) — see
   # dex_pool_pendulum_stats.node_bucket_hbd_total.
+  #
+  # COLUMN ORDER IS LOAD-BEARING: node_fees/network_fees are APPENDED after
+  # lp_fees on purpose. EnsureViews uses CREATE OR REPLACE VIEW, which can only
+  # add columns at the END of an existing view — it cannot insert, rename, or
+  # reorder. Putting a new column before an existing one makes Postgres read it
+  # as a rename ("cannot change name of view column ...") and the indexer dies
+  # at startup on every deployment that already has the old view. Only ever
+  # append new columns here.
   - name: dex_pool_fees_by_asset
     sql: |
       CREATE OR REPLACE VIEW dex_pool_fees_by_asset AS
@@ -234,9 +242,9 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees,
         SUM(COALESCE(node_share, 0)) AS node_fees,
-        SUM(COALESCE(network_credit, 0)) AS network_fees,
-        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+        SUM(COALESCE(network_credit, 0)) AS network_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL
       GROUP BY indexer_contract_id, asset;
@@ -258,9 +266,9 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees,
         SUM(COALESCE(node_share, 0)) AS node_fees,
-        SUM(COALESCE(network_credit, 0)) AS network_fees,
-        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+        SUM(COALESCE(network_credit, 0)) AS network_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '24 hours'
       GROUP BY indexer_contract_id, asset;
@@ -273,9 +281,9 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees,
         SUM(COALESCE(node_share, 0)) AS node_fees,
-        SUM(COALESCE(network_credit, 0)) AS network_fees,
-        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+        SUM(COALESCE(network_credit, 0)) AS network_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '7 days'
       GROUP BY indexer_contract_id, asset;
@@ -288,9 +296,9 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(lp_fee, 0)) AS lp_fees,
         SUM(COALESCE(node_share, 0)) AS node_fees,
-        SUM(COALESCE(network_credit, 0)) AS network_fees,
-        SUM(COALESCE(lp_fee, 0)) AS lp_fees
+        SUM(COALESCE(network_credit, 0)) AS network_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '30 days'
       GROUP BY indexer_contract_id, asset;
