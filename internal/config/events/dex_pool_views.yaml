@@ -218,6 +218,14 @@ views:
   # (5-field) and pendulum (8-field) fee layouts; legacy 4-field rows (asset
   # NULL) are excluded so the per-asset breakdown stays clean. total/protocol
   # fees are derived the same way as the time-window views (see above).
+  #
+  # `protocol_fees` is the combined protocol cut across all eras. `node_fees`
+  # (ns) and `network_fees` (nc) break it into the pendulum sub-buckets and sum
+  # to protocol_fees ONLY for pendulum rows — legacy/v1 rows carry the cut in
+  # magi_fee, so node_fees+network_fees = 0 there while protocol_fees is nonzero.
+  # All four (total/protocol/node/network/lp) are in output-asset base units.
+  # The HBD node bucket (nb) is NOT here (different denomination) — see
+  # dex_pool_pendulum_stats.node_bucket_hbd_total.
   - name: dex_pool_fees_by_asset
     sql: |
       CREATE OR REPLACE VIEW dex_pool_fees_by_asset AS
@@ -226,6 +234,8 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(node_share, 0)) AS node_fees,
+        SUM(COALESCE(network_credit, 0)) AS network_fees,
         SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL
@@ -248,6 +258,8 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(node_share, 0)) AS node_fees,
+        SUM(COALESCE(network_credit, 0)) AS network_fees,
         SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '24 hours'
@@ -261,6 +273,8 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(node_share, 0)) AS node_fees,
+        SUM(COALESCE(network_credit, 0)) AS network_fees,
         SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '7 days'
@@ -274,6 +288,8 @@ views:
         asset,
         SUM(COALESCE(total_fee, COALESCE(lp_fee, 0) + COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS total_fees,
         SUM(COALESCE(magi_fee, COALESCE(node_share, 0) + COALESCE(network_credit, 0))) AS protocol_fees,
+        SUM(COALESCE(node_share, 0)) AS node_fees,
+        SUM(COALESCE(network_credit, 0)) AS network_fees,
         SUM(COALESCE(lp_fee, 0)) AS lp_fees
       FROM dex_pool_fee_events
       WHERE asset IS NOT NULL AND indexer_ts > NOW() - INTERVAL '30 days'
