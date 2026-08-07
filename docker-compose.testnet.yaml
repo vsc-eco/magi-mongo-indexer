@@ -33,10 +33,12 @@ services:
     environment:
       HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://indexer:indexerpass@postgres:5432/indexerdb
       HASURA_GRAPHQL_DATABASE_URL: postgres://gql_reader:readonlypass@postgres:5432/indexerdb
-      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
-      HASURA_GRAPHQL_DEV_MODE: "true"
+      # review2 CRITICAL #7: secure-by-default (see SECURITY.md). Opt back in
+      # via .env per-deployment.
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "${HASURA_GRAPHQL_ENABLE_CONSOLE:-false}"
+      HASURA_GRAPHQL_DEV_MODE: "${HASURA_GRAPHQL_DEV_MODE:-false}"
       HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
-      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: public
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: "${HASURA_GRAPHQL_UNAUTHORIZED_ROLE:-}"
 
       # cost limits
       HASURA_GRAPHQL_MAX_TOTAL_NODE_LIMIT: "10000"
