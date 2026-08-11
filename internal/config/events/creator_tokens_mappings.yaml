@@ -1,0 +1,243 @@
+# ===============================
+# LUMEN CREATOR TOKENS — event → table mappings for magi-mongo-indexer
+# ===============================
+# Drop this file (and creator_tokens_views.yaml beside it) into
+# magi-mongo-indexer's internal/config/events/ directory, set the contract
+# address + fromBlockHeight below, and restart. The indexer backfills from
+# fromBlockHeight automatically the first time it sees a new contract.
+#
+# WHY THIS EXISTS RATHER THAN OUR OWN SERVER. This repo has its own Go indexer
+# (../index.go) that folds exactly these events — but it has no HTTP server, so
+# nothing could ever read it. magi-mongo-indexer is the official vsc-eco service
+# that already solves that: it polls the node's MongoDB contract_state for
+# contract logs, normalises them into Postgres, and serves them through Hasura
+# GraphQL with subscriptions. Altera runs against it in production. Building and
+# hosting a second one would be work nobody needs done twice.
+#
+# THE ONE THING THAT HAD TO CHANGE ON OUR SIDE: the indexer identifies a JSON log
+# by a field called "type" (internal/indexer/mapper, MatchesLogType — hardcoded).
+# Our events used "ev". We renamed ours, because nothing is deployed yet and this
+# is free today and a migration later.
+#
+# Our logs are FLAT — no `attributes` wrapper — so every jsonPath here is a
+# top-level `$.field`, unlike the magi_market/magi_nft mappings which nest.
+#
+# The indexer adds indexer_contract_id / indexer_block_height / indexer_tx_hash /
+# indexer_ts / indexer_id to every row automatically; none are declared here.
+#
+# MONEY IS A STRING, ALWAYS. Every HBD/token amount on our wire is a quoted
+# base-10 integer in base units (3 dp for HBD; whole integers for token counts).
+# Declaring one as `numeric` would push it through a float somewhere in the
+# pipeline, and this is a money contract. The views do their arithmetic with
+# explicit ::numeric casts instead.
+
+contracts:
+  - address: "vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8"   # Magi testnet, deployed 2026-08-06
+    # Set to the block the contract was deployed at. 0 backfills the whole
+    # chain, which works but is slow and pointless.
+    fromBlockHeight: 5480160   # the contract's `init` call; it cannot have emitted anything earlier
+    events:
+
+      # ---- market lifecycle ----
+
+      - log_type: "registered"
+        table: "lumen_ct_registered_events"
+        schema: { creator: string, actor: string, block: numeric, face: string, cap: string, fee_paid: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", face: "$.face", cap: "$.cap", fee_paid: "$.feePaid" }
+
+      - log_type: "renewed"
+        table: "lumen_ct_renewed_events"
+        schema: { creator: string, actor: string, block: numeric, periods: numeric, paid: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", periods: "$.periods", paid: "$.paid" }
+
+      - log_type: "faceChanged"
+        table: "lumen_ct_face_changed_events"
+        schema: { creator: string, actor: string, block: numeric, old_face: string, new_face: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", old_face: "$.oldFace", new_face: "$.newFace" }
+
+      - log_type: "capChanged"
+        table: "lumen_ct_cap_changed_events"
+        schema: { creator: string, actor: string, block: numeric, old_cap: string, new_cap: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", old_cap: "$.oldCap", new_cap: "$.newCap" }
+
+      - log_type: "retired"
+        table: "lumen_ct_retired_events"
+        schema: { creator: string, actor: string, block: numeric }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block" }
+
+      - log_type: "closed"
+        table: "lumen_ct_closed_events"
+        schema: { creator: string, actor: string, block: numeric }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block" }
+
+      # ---- the bonding curve. bought/sold are the ONLY issuance and redemption
+      # paths, so these two tables are the whole balance history. They already
+      # shipped unrecognised by our own indexer once (2026-07-28); if either is
+      # ever missing here, every balance derived downstream is silently wrong.
+      #
+      # NEITHER CARRIES A PRICE. There is no rateAfter field on the wire — every
+      # field below was checked against the constructors' real output, not
+      # against a doc. The price is recoverable exactly anyway: it is a pure
+      # function of supply (curve.go SpotRate), and supply is the running sum of
+      # minted minus sold. The price-history view does that rather than the
+      # contract carrying a redundant field. ----
+
+      - log_type: "bought"
+        table: "lumen_ct_bought_events"
+        schema: { creator: string, actor: string, block: numeric, minted: string, cost: string, fee: string, total_due: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", minted: "$.minted", cost: "$.cost", fee: "$.fee", total_due: "$.totalDue" }
+
+      # `sold` is the token count burned; `gross` is the curve slice before the
+      # exit tax and trade fee; `net` is what the seller actually received.
+      # tax_bps/held_blocks are the exit-tax rate and the seller's hold clock at
+      # execution — kept because they are the only on-chain record of WHY a given
+      # seller paid the tax they did.
+      - log_type: "sold"
+        table: "lumen_ct_sold_events"
+        schema: { creator: string, actor: string, block: numeric, sold: string, gross: string, tax: string, fee: string, net: string, tax_bps: numeric, held_blocks: numeric, taxable_gross: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", sold: "$.sold", gross: "$.gross", tax: "$.tax", fee: "$.fee", net: "$.net", tax_bps: "$.taxBps", held_blocks: "$.heldBlocks", taxable_gross: "$.taxableGross" }
+
+      - log_type: "transferred"
+        table: "lumen_ct_transferred_events"
+        schema: { creator: string, actor: string, recipient: string, block: numeric, amount: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", recipient: "$.to", block: "$.block", amount: "$.amount" }
+
+      # ★ NAME COLLISION WITH THE STOCK magi_nft MAPPING (Phase-0 model,
+      # 2026-07-30). We emit `paused` and `unpaused`, and so does
+      # magi_nft_mappings.yaml. The indexer's FindMapping is FIRST-MATCH-WINS
+      # across every *_mappings.yaml, and once our init_magi_nft event has
+      # discovered this contract the magi_nft template matches our address too
+      # — so our pause events land in magi_nft_paused_events with a NULL `by`
+      # and surface as magi_nft_overview.paused to every wallet and explorer
+      # reading the shared tables.
+      #
+      # Three places in this repo assert these two events are unmapped. They
+      # are unmapped BY US; that is not the same thing, and our own mapping
+      # test cannot see the difference because it only reads this file.
+      #
+      # Mapping them here does NOT resolve the collision (first-match-wins
+      # still decides), so this is recorded rather than papered over. The real
+      # fixes are upstream and are the operator's call: rename our two events,
+      # or have the indexer scope a template to the contracts it discovered.
+      # Until then, treat magi_nft_overview.paused as UNTRUSTWORTHY for this
+      # contract — read our own kPaused state instead.
+
+      # ---- matured-bucket movement, OUR flat shape ----
+      #
+      # The same movements also go out as the standard TransferSingle, which the
+      # indexer folds into the stock magi_nft tables for wallets and explorers.
+      # This flat sibling exists because lumen_ct_balances — the view the
+      # WIND-DOWN KEEPER reads to find holders — is built on our own tables.
+      # Without it, a holder who acquired tokens on magi-market is invisible to
+      # the keeper, supply never reaches zero, and the market can never close.
+      #
+      # Flat rather than nested deliberately: the standard family nests under
+      # `attributes`, and this file's own field-path checker reads flat `$.field`
+      # paths only. Emitting a flat sibling keeps the tripwire honest instead of
+      # widening it for one event.
+      - log_type: "maturedMoved"
+        table: "lumen_ct_matured_moved_events"
+        schema: { creator: string, actor: string, sender: string, recipient: string, block: numeric, amount: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", sender: "$.from", recipient: "$.to", block: "$.block", amount: "$.amount" }
+
+      # ---- wind-down exits ----
+
+      - log_type: "refunded"
+        table: "lumen_ct_refunded_events"
+        schema: { creator: string, actor: string, block: numeric, credits: string, payout: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", credits: "$.credits", payout: "$.payout" }
+
+      - log_type: "refundPushed"
+        table: "lumen_ct_refund_pushed_events"
+        schema: { creator: string, actor: string, holder: string, block: numeric, credits_burned: string, payout: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", holder: "$.holder", block: "$.block", credits_burned: "$.creditsBurned", payout: "$.payout" }
+
+      # ---- the escrowed-ask lifecycle. asked/answered/reclaimed/declined are
+      # the delivery record, and `actor` is NOT always the payee — see each
+      # event's own asker/holder field. ----
+
+      - log_type: "asked"
+        table: "lumen_ct_asked_events"
+        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_spent: string, commission_hbd: string, rate: string, deadline_blocks: numeric, content_hash: string, offering_id: numeric }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_spent: "$.creditsSpent", commission_hbd: "$.commissionHbd", rate: "$.rate", deadline_blocks: "$.deadlineBlocks", content_hash: "$.contentHash", offering_id: "$.offeringId" }
+
+      - log_type: "answered"
+        table: "lumen_ct_answered_events"
+        schema: { creator: string, actor: string, block: numeric, seq: numeric, credits_to_creator: string, commission_hbd: string, answer_hash: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", credits_to_creator: "$.creditsToCreator", commission_hbd: "$.commissionHbd", answer_hash: "$.answerHash" }
+
+      # asker, NOT actor: reclaim is permissionless, so actor may be a keeper or
+      # any stranger pushing an abandoned escrow, while the chain always pays the
+      # escrow's own asker. Crediting actor is a real bug we already made once.
+      - log_type: "reclaimed"
+        table: "lumen_ct_reclaimed_events"
+        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string, commission_hbd: string, commission_retained_hbd: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits", commission_hbd: "$.commissionHbd", commission_retained_hbd: "$.commissionRetainedHbd" }
+
+      - log_type: "declined"
+        table: "lumen_ct_declined_events"
+        schema: { creator: string, actor: string, asker: string, block: numeric, seq: numeric, credits: string, commission_hbd: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", asker: "$.asker", block: "$.block", seq: "$.seq", credits: "$.credits", commission_hbd: "$.commissionHbd" }
+
+      # ---- the buyer's rating. `Answer` is a unilateral "this is done" that
+      # pays the creator, so this is the only signal that says whether the work
+      # was real. actor IS the buyer (the contract refuses anyone else). ----
+
+      - log_type: "rated"
+        table: "lumen_ct_rated_events"
+        schema: { creator: string, actor: string, block: numeric, seq: numeric, score: numeric }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", seq: "$.seq", score: "$.score" }
+
+      # ---- the offerings shop ----
+
+      - log_type: "offeringCreated"
+        table: "lumen_ct_offering_created_events"
+        schema: { creator: string, actor: string, block: numeric, offering_id: numeric, title: string, price: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", offering_id: "$.offeringId", title: "$.title", price: "$.price" }
+
+      # oldPrice AND newPrice — an update records the move, not just the result,
+      # so the 2x/7d anti-rug band is auditable from the log alone.
+      - log_type: "offeringUpdated"
+        table: "lumen_ct_offering_updated_events"
+        schema: { creator: string, actor: string, block: numeric, offering_id: numeric, title: string, old_price: string, new_price: string }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", offering_id: "$.offeringId", title: "$.title", old_price: "$.oldPrice", new_price: "$.newPrice" }
+
+      - log_type: "offeringDeleted"
+        table: "lumen_ct_offering_deleted_events"
+        schema: { creator: string, actor: string, block: numeric, offering_id: numeric }
+        parse: "json"
+        fields: { creator: "$.creator", actor: "$.actor", block: "$.block", offering_id: "$.offeringId" }
+
+      # ---- platform money. treasuryWithdrawn/tradeFeesClaimed carry NO creator
+      # field (they are account-scoped, not market-scoped). ----
+
+      - log_type: "treasuryWithdrawn"
+        table: "lumen_ct_treasury_withdrawn_events"
+        schema: { actor: string, block: numeric, amount: string }
+        parse: "json"
+        fields: { actor: "$.actor", block: "$.block", amount: "$.amount" }
+
+      - log_type: "tradeFeesClaimed"
+        table: "lumen_ct_trade_fees_claimed_events"
+        schema: { actor: string, block: numeric, amount: string }
+        parse: "json"
+        fields: { actor: "$.actor", block: "$.block", amount: "$.amount" }

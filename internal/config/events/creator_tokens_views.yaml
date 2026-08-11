@@ -1,0 +1,288 @@
+# ===============================
+# LUMEN CREATOR TOKENS — Hasura views
+# ===============================
+# These are what actually replace the REST endpoints the frontend was calling
+# into thin air. Each view answers one screen's question:
+#
+#   lumen_ct_balances        -> "which markets does this account hold?"  (Your Tokens)
+#   lumen_ct_price_history   -> "how has this token moved?"              (the chart)
+#   lumen_ct_delivery_record -> "does this creator deliver?"             (trust panel + discovery ranking)
+#   lumen_ct_my_asks         -> "what have I asked for?"                 (Your Tokens > asks)
+#   lumen_ct_creator_earnings-> "what have I earned?"                    (Studio > earnings)
+#   lumen_ct_discovery       -> the ranked creator list                  (/creators)
+#
+# TWO RULES THESE VIEWS OBEY, both learned the hard way in this codebase:
+#
+#   1. NEVER let a missing record read as a good one. A creator with no delivery
+#      history sorts BELOW one with a proven record, never above — see
+#      lumen_ct_discovery's ORDER BY. "Unproven" and "perfect" are not the same
+#      thing, and ranking them the same is how a discovery page rewards being new
+#      over being good.
+#
+#   2. NO VOLUME, ANYWHERE. Not exposed, not ranked on, not summed. Wash trading
+#      buys a fake track record and volume is the metric that pays for it. If a
+#      future view needs a turnover figure it should be a deliberate decision by
+#      whoever adds it, not something already sitting in reach of a ranking.
+#
+# Money arrives as TEXT (base-10 integers in base units) because that is how it
+# is stored on the wire — every arithmetic below casts explicitly with ::numeric.
+# Nothing here goes through a float.
+
+views:
+
+  # -------------------------------------------------------------------------
+  # BALANCES — the holder -> creators reverse index.
+  #
+  # This is the one contract state cannot answer. State is keyed creator ->
+  # holder, so "every market this account is in" is unanswerable without
+  # enumerating creators first. Replaying the four token-moving events gives it
+  # directly.
+  #
+  # Escrowed tokens are NOT here, matching the contract's own kBal semantics: an
+  # ask debits the holder's balance into the escrow record, and it comes back on
+  # answer/reclaim/decline. `asked` therefore subtracts and the three
+  # resolutions add back — except `answered`, which pays the CREATOR.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_balances
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_balances AS
+      WITH moves AS (
+        -- minted to the buyer
+        SELECT creator, actor AS holder, minted::numeric AS delta FROM lumen_ct_bought_events
+        UNION ALL
+        -- burned from the seller
+        SELECT creator, actor AS holder, -(sold::numeric) FROM lumen_ct_sold_events
+        UNION ALL
+        -- transfers move between two holders
+        SELECT creator, actor AS holder, -(amount::numeric) FROM lumen_ct_transferred_events
+        UNION ALL
+        SELECT creator, recipient AS holder, amount::numeric FROM lumen_ct_transferred_events
+        UNION ALL
+        -- Matured-bucket movement (2026-07-30). A sale on magi-market settles
+        -- through safeTransferFrom, which emits ONLY these — no bought/sold row
+        -- exists for it. Without these two branches a holder who acquired
+        -- tokens on the marketplace is invisible here, and this view is what the
+        -- wind-down keeper reads to find holders: it would never sweep them,
+        -- supply would never reach zero, and the market could never close.
+        --
+        -- Bucket moves are netted, not counted: a graduation (sender = '') and a
+        -- matured burn on a curve sale (recipient = '') are already reflected by
+        -- the bought/sold rows, so both are excluded here and only genuine
+        -- holder-to-holder movement is folded in.
+        SELECT creator, sender AS holder, -(amount::numeric) FROM lumen_ct_matured_moved_events
+          WHERE sender <> '' AND recipient <> ''
+        UNION ALL
+        SELECT creator, recipient AS holder, amount::numeric FROM lumen_ct_matured_moved_events
+          WHERE sender <> '' AND recipient <> ''
+        UNION ALL
+        -- an ask escrows the asker's tokens out of their balance
+        SELECT creator, actor AS holder, -(credits_spent::numeric) FROM lumen_ct_asked_events
+        UNION ALL
+        -- answered pays the CREATOR, not the asker
+        SELECT creator, creator AS holder, credits_to_creator::numeric FROM lumen_ct_answered_events
+        UNION ALL
+        -- reclaim and decline return the escrow to the ASKER (never `actor`:
+        -- reclaim is permissionless, so actor may be a keeper or a stranger)
+        SELECT creator, asker AS holder, credits::numeric FROM lumen_ct_reclaimed_events
+        UNION ALL
+        SELECT creator, asker AS holder, credits::numeric FROM lumen_ct_declined_events
+        UNION ALL
+        -- wind-down exits burn the holder's tokens
+        SELECT creator, actor AS holder, -(credits::numeric) FROM lumen_ct_refunded_events
+        UNION ALL
+        SELECT creator, holder, -(credits_burned::numeric) FROM lumen_ct_refund_pushed_events
+      )
+      SELECT creator, holder, SUM(delta) AS tokens
+      FROM moves
+      GROUP BY creator, holder
+      HAVING SUM(delta) > 0;
+
+  # -------------------------------------------------------------------------
+  # PRICE HISTORY — the chart.
+  #
+  # No event carries a price, and none needs to: on a bonding curve the price is
+  # a pure function of supply. This walks the trade sequence, keeps a running
+  # supply, and reports it per trade. The frontend applies the same curve formula
+  # it already ports (contract-math.ts spotRateBaseUnits) to turn supply into a
+  # price — deliberately NOT duplicated as SQL here, because two copies of the
+  # curve in two languages is how a chart starts disagreeing with the buy button.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_price_history
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_price_history AS
+      WITH trades AS (
+        SELECT creator, indexer_block_height AS block, indexer_ts AS ts,
+               minted::numeric AS delta, 'buy' AS side
+        FROM lumen_ct_bought_events
+        UNION ALL
+        SELECT creator, indexer_block_height, indexer_ts,
+               -(sold::numeric), 'sell'
+        FROM lumen_ct_sold_events
+      )
+      SELECT creator, block, ts, side, delta,
+             SUM(delta) OVER (PARTITION BY creator ORDER BY block, ts) AS supply_after
+      FROM trades;
+
+  # -------------------------------------------------------------------------
+  # DELIVERY RECORD — the trust panel, and the only thing discovery ranks on.
+  #
+  # SELF-DEALT ASKS ARE EXCLUDED (asker = creator), matching the contract's own
+  # delivery counters exactly. Without that a creator pads their record by asking
+  # themselves and declining, which costs nothing but transaction fees.
+  #
+  # A DECLINE IS NEUTRAL: not a delivery, not a miss. The creator answered
+  # promptly with "I can't take this", and the money went back in full — counting
+  # it either way would punish or reward saying no honestly.
+  #
+  # `avg_rating` is NULL when unrated. Never coalesce it to 0 or to 5: unrated
+  # must render as "no ratings yet" and must never rank as if it were either.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_delivery_record
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_delivery_record AS
+      WITH answered AS (
+        SELECT an.creator, COUNT(*) AS n
+        FROM lumen_ct_answered_events an
+        JOIN lumen_ct_asked_events a ON a.creator = an.creator AND a.seq = an.seq
+        WHERE a.actor <> an.creator
+        GROUP BY an.creator
+      ),
+      missed AS (
+        SELECT r.creator, COUNT(*) AS n
+        FROM lumen_ct_reclaimed_events r
+        WHERE r.asker <> r.creator
+        GROUP BY r.creator
+      ),
+      declined AS (
+        SELECT d.creator, COUNT(*) AS n
+        FROM lumen_ct_declined_events d
+        WHERE d.asker <> d.creator
+        GROUP BY d.creator
+      ),
+      -- Response time, in BLOCKS, per delivered job. Median rather than mean is
+      -- computed by the reader; this exposes the raw pairs' aggregate.
+      response AS (
+        SELECT an.creator,
+               percentile_cont(0.5) WITHIN GROUP (
+                 ORDER BY (an.indexer_block_height - a.indexer_block_height)
+               ) AS median_response_blocks
+        FROM lumen_ct_answered_events an
+        JOIN lumen_ct_asked_events a ON a.creator = an.creator AND a.seq = an.seq
+        WHERE a.actor <> an.creator
+        GROUP BY an.creator
+      ),
+      rated AS (
+        SELECT creator, AVG(score)::numeric(4,2) AS avg_rating, COUNT(*) AS rating_count
+        FROM lumen_ct_rated_events
+        GROUP BY creator
+      ),
+      -- The LATEST registration per creator, not the first: a market that
+      -- closed and was re-registered is a NEW incarnation with a fresh delivery
+      -- record, and dating it from the dead one would show a brand-new market as
+      -- years old.
+      creators AS (
+        SELECT creator, MAX(indexer_block_height) AS registered_block, MAX(indexer_ts) AS registered_ts
+        FROM lumen_ct_registered_events GROUP BY creator
+      )
+      SELECT c.creator,
+             c.registered_block,
+             c.registered_ts,
+             COALESCE(a.n, 0) AS answered_count,
+             COALESCE(m.n, 0) AS missed_count,
+             COALESCE(d.n, 0) AS declined_count,
+             resp.median_response_blocks,
+             r.avg_rating,
+             COALESCE(r.rating_count, 0) AS rating_count,
+             -- NULL, not 0, when nothing has resolved yet: a creator who has
+             -- never been asked has no completion rate, and showing 0% would
+             -- read as "fails everything".
+             CASE WHEN COALESCE(a.n,0) + COALESCE(m.n,0) = 0 THEN NULL
+                  ELSE ROUND(100.0 * a.n / (a.n + m.n), 0)
+             END AS completion_pct
+      FROM creators c
+      LEFT JOIN answered a ON a.creator = c.creator
+      LEFT JOIN missed   m ON m.creator = c.creator
+      LEFT JOIN declined d ON d.creator = c.creator
+      LEFT JOIN response resp ON resp.creator = c.creator
+      LEFT JOIN rated    r ON r.creator = c.creator;
+
+  # -------------------------------------------------------------------------
+  # MY ASKS — one row per escrow with its current state, for the asker's view.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_my_asks
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_my_asks AS
+      SELECT a.creator,
+             a.actor AS asker,
+             a.seq,
+             a.credits_spent,
+             a.commission_hbd,
+             a.offering_id,
+             a.deadline_blocks,
+             a.indexer_block_height AS asked_block,
+             a.indexer_ts AS asked_ts,
+             CASE
+               WHEN an.seq IS NOT NULL THEN 'answered'
+               WHEN d.seq  IS NOT NULL THEN 'declined'
+               WHEN r.seq  IS NOT NULL THEN 'reclaimed'
+               ELSE 'pending'
+             END AS status,
+             rt.score AS rating
+      FROM lumen_ct_asked_events a
+      LEFT JOIN lumen_ct_answered_events  an ON an.creator = a.creator AND an.seq = a.seq
+      LEFT JOIN lumen_ct_declined_events  d  ON d.creator  = a.creator AND d.seq  = a.seq
+      LEFT JOIN lumen_ct_reclaimed_events r  ON r.creator  = a.creator AND r.seq  = a.seq
+      LEFT JOIN lumen_ct_rated_events     rt ON rt.creator = a.creator AND rt.seq = a.seq;
+
+  # -------------------------------------------------------------------------
+  # CREATOR EARNINGS — the Studio's income panel.
+  #
+  # Service income is the TOKEN leg paid on answer (credits_to_creator); the
+  # commission is the platform's, never the creator's, and is deliberately not
+  # summed into their total. Trade fees are claimed separately and are HBD.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_creator_earnings
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_creator_earnings AS
+      SELECT c.creator,
+             COALESCE(svc.tokens_earned, 0) AS service_tokens_earned,
+             COALESCE(svc.jobs, 0)          AS jobs_delivered,
+             COALESCE(fees.hbd_claimed, 0)  AS trade_fees_claimed_hbd
+      FROM (SELECT DISTINCT creator FROM lumen_ct_registered_events) c
+      LEFT JOIN (
+        SELECT creator, SUM(credits_to_creator::numeric) AS tokens_earned, COUNT(*) AS jobs
+        FROM lumen_ct_answered_events GROUP BY creator
+      ) svc ON svc.creator = c.creator
+      LEFT JOIN (
+        SELECT actor AS creator, SUM(amount::numeric) AS hbd_claimed
+        FROM lumen_ct_trade_fees_claimed_events GROUP BY actor
+      ) fees ON fees.creator = c.creator;
+
+  # -------------------------------------------------------------------------
+  # DISCOVERY — the ranked creator list.
+  #
+  # RANKED ON DELIVERY, NOTHING ELSE. Not price, not market cap, not how much has
+  # traded. The ordering below is the product's whole thesis about what a creator
+  # token is worth holding, expressed as an ORDER BY:
+  #
+  #   1. proven creators first  (a delivery record exists at all)
+  #   2. then by completion rate
+  #   3. then by rating
+  #   4. then by responsiveness
+  #
+  # Unproven creators are NOT excluded — they sort last, so a new creator is
+  # discoverable without outranking someone who has actually delivered.
+  # Retired and closed markets are excluded outright: they cannot be bought.
+  # -------------------------------------------------------------------------
+  - name: lumen_ct_discovery
+    sql: |
+      CREATE OR REPLACE VIEW lumen_ct_discovery AS
+      SELECT d.*
+      FROM lumen_ct_delivery_record d
+      WHERE d.creator NOT IN (SELECT creator FROM lumen_ct_retired_events)
+        AND d.creator NOT IN (SELECT creator FROM lumen_ct_closed_events)
+      ORDER BY
+        (d.completion_pct IS NOT NULL) DESC,
+        d.completion_pct DESC NULLS LAST,
+        d.avg_rating DESC NULLS LAST,
+        d.median_response_blocks ASC NULLS LAST;
