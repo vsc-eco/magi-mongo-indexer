@@ -74,6 +74,20 @@ func main() {
 		}
 	}
 
+	// --- Optional FULL replay: re-parse EVERY stored raw log under the current
+	//     mappings. Unlike BACKFILL_BLOCKS above (bounded window, UPDATE-only,
+	//     NULL-gated) this INSERTS rows, so it is the only path that can recover
+	//     history for an event kind that was added to a mapping AFTER the
+	//     contract was already being indexed. Off by default; it is O(all logs).
+	if cfg.ReplayLogs {
+		log.Printf("[replay] REPLAY_CONTRACT_LOGS set — replaying contract_logs under the current mappings")
+		if err := fetcher.BackfillFromGeneric(db); err != nil {
+			log.Printf("[replay] error: %v", err)
+		} else {
+			log.Printf("[replay] complete")
+		}
+	}
+
 	// --- Watcher loop (recovers automatically) ---
 	go func() {
 		backoff := time.Second * 5

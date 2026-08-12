@@ -92,6 +92,7 @@ If you need to change the MongoDB connection or polling interval, you can modify
       MONGO_DB_NAME: go-vsc                          # Database name
       POLL_INTERVAL_SEC: 5                           # Polling interval in seconds
       BACKFILL_BLOCKS: 0                             # Startup re-parse window (0 = off, see below)
+      REPLAY_CONTRACT_LOGS: ""                       # "1" = full replay of contract_logs on startup (see below)
       ...
 ```
 
@@ -328,6 +329,33 @@ Notes:
 - Default is `0` (off).
 - Cost scales with window size × raw log volume; pick the smallest window that covers your mapping change.
 - Only columns in the event's `schema` are considered for the NULL guard. `indexer_*` metadata columns are not touched.
+
+## Full log replay (`REPLAY_CONTRACT_LOGS`)
+
+`BACKFILL_BLOCKS` fixes columns; it cannot recover **rows**. Because it is bounded to a
+window and issues `UPDATE ... WHERE indexer_log_hash = $n AND (<col> IS NULL ...)`, it can
+only touch rows that already exist. If a mapping gains an entirely **new event kind**
+after a contract has been indexed, the historic logs of that kind were never inserted, so
+there is nothing to update and that history stays missing — the poller will not revisit
+it either, because `GetLastIndexedBlock` already returns the head.
+
+`REPLAY_CONTRACT_LOGS=1` re-parses **every** stored raw log for each mapped contract (from
+`fromBlockHeight` where set) under the *current* mappings and **INSERTs**, which is the
+only path that recovers such history.
+
+```bash
+REPLAY_CONTRACT_LOGS=1 docker compose up -d
+```
+
+Notes:
+- Default is off. Cost is O(all stored logs), so it is a deliberate operation, not a
+  routine one — run it after a mapping change, then unset it.
+- It reads `contract_logs`, which is populated for every mapped contract regardless of
+  whether a matching event mapping existed at the time, so the raw material survives even
+  for event kinds that were unmapped when they were first seen.
+- Covers static **and** auto-discovered contracts.
+- Inserts are keyed on `indexer_log_hash`, so re-running is idempotent for already-correct
+  rows.
 - Rows outside the window are ignored, so long-past corruption still needs a targeted script.
 
 ## Backfilling testnet DEX pools

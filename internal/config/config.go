@@ -25,6 +25,7 @@ type Config struct {
 	HasuraSecret   string        // Hasura admin secret
 	HasuraSource   string        // Hasura source database
 	BackfillBlocks uint64        // Re-parse raw logs from the last N blocks on startup (0 = off)
+	ReplayLogs     bool          // Full replay of contract_logs under the CURRENT mappings on startup (off by default)
 }
 
 // LoadConfig reads configuration values from environment variables.
@@ -41,7 +42,7 @@ type Config struct {
 //   - HASURA_ADMIN_SECRET→ Hasura admin secret
 //   - HASURA_SOURCE      → Hasura source database name
 //   - BACKFILL_BLOCKS    → On startup, re-parse raw logs from the last N blocks
-//                          and fix rows with NULL schema columns (default: 0 = off)
+//     and fix rows with NULL schema columns (default: 0 = off)
 //
 // Defaults:
 //   - DBURL: postgres://indexer:indexerpass@localhost:5432/indexerdb?sslmode=disable
@@ -64,6 +65,11 @@ func LoadConfig() Config {
 		}
 	}
 
+	replayLogs := false
+	if val := os.Getenv("REPLAY_CONTRACT_LOGS"); val == "1" || val == "true" {
+		replayLogs = true
+	}
+
 	cfg := Config{
 		DBURL:          os.Getenv("DATABASE_URL"),
 		MongoURI:       os.Getenv("MONGO_URI"),
@@ -75,6 +81,7 @@ func LoadConfig() Config {
 		HasuraSecret:   os.Getenv("HASURA_ADMIN_SECRET"),
 		HasuraSource:   os.Getenv("HASURA_SOURCE"),
 		BackfillBlocks: backfillBlocks,
+		ReplayLogs:     replayLogs,
 	}
 
 	// Apply defaults if not provided
