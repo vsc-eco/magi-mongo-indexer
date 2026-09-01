@@ -32,10 +32,12 @@
 # explicit ::numeric casts instead.
 
 contracts:
-  - address: "vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8"   # Magi testnet, deployed 2026-08-06
+  - address: "vsc1BisggC1NtviuYN1mSR372HGSU6hUfdZARt"   # Magi MAINNET, deployed 2026-08-28 by hive:lumencontracts
     # Set to the block the contract was deployed at. 0 backfills the whole
     # chain, which works but is slow and pointless.
-    fromBlockHeight: 5480160   # the contract's `init` call; it cannot have emitted anything earlier
+    fromBlockHeight: 109420593   # the deploy block; the contract cannot have emitted anything earlier
+    # Magi testnet instance (deployed 2026-08-06) is vsc1BcaD8JrwJPAAN5cU1cHKCBdZrd7jz2WGt8
+    # at fromBlockHeight 5480160 — swap the two lines above to index testnet instead.
     events:
 
       # ---- market lifecycle ----
