@@ -79,10 +79,18 @@ query {
 | `stale` | no successful poll for 10 minutes (e.g. MongoDB unreachable); `last_error` says why |
 | `node_behind` | polls succeed, but the node stopped syncing (MongoDB's newest Hive block is over 10 minutes old) |
 
-`scripts/check_health.sh <graphql-url> [label]` exits non-zero unless the status is `ok`, and posts to `ALERT_WEBHOOK_URL` (Discord or Slack) when set. Run it from cron:
+`scripts/check_health.py <graphql-url>` turns this into alerts (Python 3, standard library only). Run it from cron; it keeps a small state file per indexer and only notifies on changes:
+
+- a problem is reported after 2 consecutive failed checks, so a single blip or a restart stays quiet (`starting` never counts as a failure)
+- while it lasts, a reminder goes out every 60 minutes, or right away if the kind of problem changes
+- one "recovered" message is sent when the status is `ok` again
+- an unreachable or erroring endpoint counts as a failure too
+
+Alerts go to `ALERT_WEBHOOK_URL`: Discord webhooks get a color-coded embed (indexer name, status, last successful poll, Mongo head block and age, indexed block, last error), any other URL gets a Slack-style plain-text message. The indexer is named after the URL's host unless `INDEXER_NAME` is set. `FAIL_THRESHOLD`, `REMIND_MINUTES` and `STATE_DIR` tune the rest.
 
 ```bash
-*/5 * * * * ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/... /path/to/scripts/check_health.sh https://indexer.example.com/v1/graphql mainnet
+# keep the webhook out of the crontab, e.g. in a chmod 600 env file
+*/5 * * * * . $HOME/.config/indexer-health.env; /path/to/scripts/check_health.py https://indexer.example.com/v1/graphql
 ```
 
 For basic container health, use Hasura's built-in endpoint: `curl http://localhost:8081/healthz`
