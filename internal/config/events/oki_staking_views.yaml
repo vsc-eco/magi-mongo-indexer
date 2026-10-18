@@ -1,0 +1,72 @@
+# ===============================
+# okinoko-staking — Hasura/Postgres views
+# ===============================
+# Views over the raw event tables (oki_staking_mappings.yaml). Balance/vault
+# views take the LATEST row per key (the vault emits absolute values, so
+# DISTINCT ON by block height = current state). All carry indexer_contract_id so
+# multiple deployed vaults never merge.
+
+views:
+
+  # One row per vault — the registry (incl. reward token + lock tiers).
+  - name: okinoko_staking_vaults
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_staking_vaults AS
+      SELECT DISTINCT ON (indexer_contract_id)
+        indexer_contract_id,
+        owner,
+        asset_type,
+        stake_contract,
+        token_id,
+        cooldown_hours,
+        reward_token,
+        lock_tiers,
+        indexer_block_height
+      FROM okinoko_staking_initialized_events
+      ORDER BY indexer_contract_id, indexer_block_height DESC;
+
+  # Current position per account per vault: raw staked, voting weight
+  # (staked×multiplier/10000), the lock multiplier + end, and any pending
+  # unstake. Withdrawable-at = requested + cooldown_hours*3600 (from the vaults
+  # view). Fully-exited accounts remain with staked=0 (final 0 event).
+  - name: okinoko_staking_balances
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_staking_balances AS
+      SELECT DISTINCT ON (indexer_contract_id, account)
+        indexer_contract_id,
+        account,
+        staked,
+        weight,
+        multiplier_bps,
+        lock_end,
+        pending,
+        requested,
+        indexer_block_height
+      FROM okinoko_staking_balance_events
+      ORDER BY indexer_contract_id, account, indexer_block_height DESC;
+
+  # Per-vault totals: raw staked, total voting weight, active staker count.
+  - name: okinoko_staking_totals
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_staking_totals AS
+      SELECT
+        indexer_contract_id,
+        COALESCE(SUM(staked), 0) AS total_staked,
+        COALESCE(SUM(weight), 0) AS total_weight,
+        COUNT(*) FILTER (WHERE staked > 0) AS staker_count
+      FROM okinoko_staking_balances
+      GROUP BY indexer_contract_id;
+
+  # Reward deposit/claim history.
+  - name: okinoko_staking_rewards
+    sql: |
+      CREATE OR REPLACE VIEW okinoko_staking_rewards AS
+      SELECT
+        indexer_contract_id,
+        kind,
+        account,
+        amount,
+        reward_per_weight,
+        indexer_block_height
+      FROM okinoko_staking_reward_events
+      ORDER BY indexer_block_height DESC;

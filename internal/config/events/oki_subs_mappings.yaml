@@ -1,0 +1,361 @@
+# ===============================
+# OKINOKO SUBS CONTRACT MAPPINGS
+# ===============================
+#
+# Subscription management contract for the Magi/VSC network.
+# Enables providers to publish one-time or recurring subscription offers.
+# Users can subscribe, top-up, cancel. Providers can collect, disable, refund.
+#
+# Format: CSV with pipe delimiter (|) and colon key delimiter (:)
+# Contract ID: vsc1BpkPNtC1pBLhxtNn4uE3QkLhudoyzAiXUi
+#
+# Events (14 types):
+#   oc  — Offer Created
+#   od  — Offer Description Changed
+#   ol  — Offer Closed
+#   oo  — Offer Reopened
+#   op  — One-Time Payment
+#   os  — Subscription Started
+#   ost — Subscription Topped Up
+#   osr — Subscription Reactivated
+#   ox  — Subscription Canceled
+#   ocb — Subscription Interval Collected
+#   oi  — Subscription Marked Inactive
+#   ocs — Collection Summary
+#   oad — Admin Disabled Subscription
+#   or  — Admin Refunded Subscription
+#
+# ===============================
+
+contracts:
+  - address: "vsc1BpkPNtC1pBLhxtNn4uE3QkLhudoyzAiXUi"
+    fromBlockHeight: 5000
+    events:
+
+      # =========================================
+      # Offer Created (oc)
+      # =========================================
+      # Emitted when a provider creates a new offer
+      # Example: oc|id:1|provider:hive:alice|name:Pro Plan|type:subscription|asset:hive|one_time:0|intervals:monthly=5.000,yearly=50.000|created_at:1234567890
+      - log_type: "oc"
+        table: "oki_subs_offer_created_events"
+        schema:
+          id: numeric
+          provider: string
+          name: string
+          type: string
+          asset: string
+          one_time: numeric
+          intervals: string
+          created_at: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          provider: "2"
+          name: "3"
+          type: "4"
+          asset: "5"
+          one_time: "6"
+          intervals: "7"
+          created_at: "8"
+
+      # =========================================
+      # Offer Description Changed (od)
+      # =========================================
+      # Emitted on create_offer and change_offer_description
+      # Example: od|id:1|description:Access to all premium features
+      - log_type: "od"
+        table: "oki_subs_offer_description_events"
+        schema:
+          id: numeric
+          description: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          description: "2"
+
+      # =========================================
+      # Offer Closed (ol)
+      # =========================================
+      # Emitted when provider closes an offer (blocks new payments)
+      # Example: ol|id:1|state:closed
+      - log_type: "ol"
+        table: "oki_subs_offer_closed_events"
+        schema:
+          id: numeric
+          state: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          state: "2"
+
+      # =========================================
+      # Offer Reopened (oo)
+      # =========================================
+      # Emitted when provider reopens a closed offer
+      # Example: oo|id:1|state:active
+      - log_type: "oo"
+        table: "oki_subs_offer_reopened_events"
+        schema:
+          id: numeric
+          state: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          state: "2"
+
+      # =========================================
+      # One-Time Payment (op)
+      # =========================================
+      # Emitted when someone pays for a one-time offer
+      # Example: op|id:1|buyer:hive:bob|provider:hive:alice|amount:25.000|asset:hive
+      - log_type: "op"
+        table: "oki_subs_onetime_paid_events"
+        schema:
+          id: numeric
+          buyer: string
+          provider: string
+          amount: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          buyer: "2"
+          provider: "3"
+          amount: "4"
+          asset: "5"
+
+      # =========================================
+      # Subscription Started (os)
+      # =========================================
+      # Emitted when a new subscriber joins an offer
+      # Example: os|id:1|subscriber:hive:bob|index:1|interval:monthly|paid:10.000|balance:5.000|next:1234567890|asset:hive
+      - log_type: "os"
+        table: "oki_subs_started_events"
+        schema:
+          id: numeric
+          subscriber: string
+          index: numeric
+          interval: string
+          paid: numeric
+          balance: numeric
+          next: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          index: "3"
+          interval: "4"
+          paid: "5"
+          balance: "6"
+          next: "7"
+          asset: "8"
+
+      # =========================================
+      # Subscription Topped Up (ost)
+      # =========================================
+      # Emitted when an active subscriber adds more balance
+      # Example: ost|id:1|subscriber:hive:bob|interval:monthly|paid:10.000|balance:15.000|next:1234567890|asset:hive
+      - log_type: "ost"
+        table: "oki_subs_toppedup_events"
+        schema:
+          id: numeric
+          subscriber: string
+          interval: string
+          paid: numeric
+          balance: numeric
+          next: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          interval: "3"
+          paid: "4"
+          balance: "5"
+          next: "6"
+          asset: "7"
+
+      # =========================================
+      # Subscription Reactivated (osr)
+      # =========================================
+      # Emitted when an inactive subscriber resubscribes
+      # Example: osr|id:1|subscriber:hive:bob|index:1|interval:monthly|paid:10.000|balance:5.000|next:1234567890|asset:hive
+      - log_type: "osr"
+        table: "oki_subs_reactivated_events"
+        schema:
+          id: numeric
+          subscriber: string
+          index: numeric
+          interval: string
+          paid: numeric
+          balance: numeric
+          next: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          index: "3"
+          interval: "4"
+          paid: "5"
+          balance: "6"
+          next: "7"
+          asset: "8"
+
+      # =========================================
+      # Subscription Canceled (ox)
+      # =========================================
+      # Emitted when subscriber cancels (refunds unused balance)
+      # Example: ox|id:1|subscriber:hive:bob|refund:5.000|asset:hive
+      - log_type: "ox"
+        table: "oki_subs_canceled_events"
+        schema:
+          id: numeric
+          subscriber: string
+          refund: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          refund: "3"
+          asset: "4"
+
+      # =========================================
+      # Subscription Interval Collected (ocb)
+      # =========================================
+      # Emitted per subscriber per interval charged during collect_subscriptions
+      # Example: ocb|id:1|subscriber:hive:bob|amount:5.000|balance:10.000|next:1234567890|asset:hive
+      - log_type: "ocb"
+        table: "oki_subs_collected_events"
+        schema:
+          id: numeric
+          subscriber: string
+          amount: numeric
+          balance: numeric
+          next: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          amount: "3"
+          balance: "4"
+          next: "5"
+          asset: "6"
+
+      # =========================================
+      # Subscription Marked Inactive (oi)
+      # =========================================
+      # Emitted during collection when subscriber has insufficient balance
+      # Example: oi|id:1|subscriber:hive:bob|balance:0.000|asset:hive|state:inactive
+      - log_type: "oi"
+        table: "oki_subs_inactive_events"
+        schema:
+          id: numeric
+          subscriber: string
+          balance: numeric
+          asset: string
+          state: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          subscriber: "2"
+          balance: "3"
+          asset: "4"
+          state: "5"
+
+      # =========================================
+      # Collection Summary (ocs)
+      # =========================================
+      # Emitted once per collect_subscriptions call with aggregate stats
+      # Example: ocs|id:1|collected:3|processed:5|deactivated:2
+      - log_type: "ocs"
+        table: "oki_subs_collection_summary_events"
+        schema:
+          id: numeric
+          collected: numeric
+          processed: numeric
+          deactivated: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          collected: "2"
+          processed: "3"
+          deactivated: "4"
+
+      # =========================================
+      # Admin Disabled Subscription (oad)
+      # =========================================
+      # Emitted when provider force-disables a subscriber (keeps balance)
+      # Example: oad|id:1|provider:hive:alice|subscriber:hive:bob|balance:5.000|asset:hive|state:inactive
+      - log_type: "oad"
+        table: "oki_subs_admin_disabled_events"
+        schema:
+          id: numeric
+          provider: string
+          subscriber: string
+          balance: numeric
+          asset: string
+          state: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          provider: "2"
+          subscriber: "3"
+          balance: "4"
+          asset: "5"
+          state: "6"
+
+      # =========================================
+      # Admin Refunded Subscription (or)
+      # =========================================
+      # Emitted when provider refunds a subscriber's balance
+      # Example: or|id:1|provider:hive:alice|subscriber:hive:bob|was_active:true|refund:5.000|asset:hive
+      - log_type: "or"
+        table: "oki_subs_admin_refunded_events"
+        schema:
+          id: numeric
+          provider: string
+          subscriber: string
+          was_active: string
+          refund: numeric
+          asset: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          id: "1"
+          provider: "2"
+          subscriber: "3"
+          was_active: "4"
+          refund: "5"
+          asset: "6"
