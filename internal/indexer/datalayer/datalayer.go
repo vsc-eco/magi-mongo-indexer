@@ -267,20 +267,99 @@ func pqQuoteIdent(ident string) string {
 }
 
 // EnsureHealthView creates the indexer_health view for monitoring via Hasura.
-// This view provides the latest block height and last update time from contract_logs.
+// The first four columns describe indexed data (from contract_logs). The rest
+// come from indexer_heartbeat and describe liveness: last_update only moves
+// when a tracked contract emits a log, so on its own it cannot tell a quiet
+// chain from an indexer that has lost MongoDB.
+//
+// status is 'ok', 'starting' (no poll yet), 'stale' (no successful poll for
+// 10 minutes) or 'node_behind' (polls succeed but MongoDB's newest Hive block
+// is over 10 minutes old, i.e. the node itself stopped syncing).
 func EnsureHealthView(db *sql.DB) error {
+	if err := EnsureHeartbeatTable(db); err != nil {
+		return err
+	}
 	_, err := db.Exec(`
 		CREATE OR REPLACE VIEW indexer_health AS
 		SELECT
-			COALESCE(MAX(block_height), 0) AS latest_block_height,
-			COALESCE(MAX(ts), NOW()) AS last_update,
-			COUNT(DISTINCT contract_address) AS tracked_contracts,
-			COUNT(*) AS total_logs
-		FROM contract_logs
+			agg.latest_block_height,
+			agg.last_update,
+			agg.tracked_contracts,
+			agg.total_logs,
+			hb.last_poll_at AS last_poll,
+			EXTRACT(EPOCH FROM NOW() - hb.last_poll_at)::bigint AS seconds_since_poll,
+			hb.mongo_head_block,
+			hb.mongo_head_time,
+			hb.last_error,
+			hb.last_error_at,
+			CASE
+				WHEN hb.last_poll_at IS NULL THEN 'starting'
+				WHEN NOW() - hb.last_poll_at > INTERVAL '10 minutes' THEN 'stale'
+				WHEN NOW() - hb.mongo_head_time > INTERVAL '10 minutes' THEN 'node_behind'
+				ELSE 'ok'
+			END AS status
+		FROM (
+			SELECT
+				COALESCE(MAX(block_height), 0) AS latest_block_height,
+				COALESCE(MAX(ts), NOW()) AS last_update,
+				COUNT(DISTINCT contract_address) AS tracked_contracts,
+				COUNT(*) AS total_logs
+			FROM contract_logs
+		) agg
+		LEFT JOIN indexer_heartbeat hb ON hb.id = 1
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create indexer_health view: %w", err)
 	}
 	log.Println("[health] created/updated indexer_health view")
 	return nil
+}
+
+// EnsureHeartbeatTable creates the single-row table the poll loop writes to.
+func EnsureHeartbeatTable(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS indexer_heartbeat (
+			id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+			last_poll_at TIMESTAMPTZ,
+			mongo_head_block BIGINT,
+			mongo_head_time TIMESTAMPTZ,
+			last_error TEXT,
+			last_error_at TIMESTAMPTZ
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create indexer_heartbeat table: %w", err)
+	}
+	return nil
+}
+
+// RecordPoll marks a poll cycle that completed without errors.
+// headTime is MongoDB's newest Hive block timestamp (UTC, RFC3339 without zone).
+func RecordPoll(db *sql.DB, headBlock uint64, headTime string) {
+	_, err := db.Exec(`
+		INSERT INTO indexer_heartbeat (id, last_poll_at, mongo_head_block, mongo_head_time)
+		VALUES (1, NOW(), $1, ($2::timestamp AT TIME ZONE 'UTC'))
+		ON CONFLICT (id) DO UPDATE SET
+			last_poll_at = EXCLUDED.last_poll_at,
+			mongo_head_block = EXCLUDED.mongo_head_block,
+			mongo_head_time = EXCLUDED.mongo_head_time`,
+		headBlock, headTime)
+	if err != nil {
+		log.Printf("[health] failed to record poll: %v", err)
+	}
+}
+
+// RecordPollError stores the latest poll error without advancing last_poll_at,
+// so a persistent failure turns the health status to 'stale'.
+func RecordPollError(db *sql.DB, pollErr error) {
+	_, err := db.Exec(`
+		INSERT INTO indexer_heartbeat (id, last_error, last_error_at)
+		VALUES (1, $1, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			last_error = EXCLUDED.last_error,
+			last_error_at = EXCLUDED.last_error_at`,
+		pollErr.Error())
+	if err != nil {
+		log.Printf("[health] failed to record poll error: %v", err)
+	}
 }

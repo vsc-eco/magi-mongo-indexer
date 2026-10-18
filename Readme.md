@@ -56,6 +56,12 @@ The indexer creates an `indexer_health` view queryable through Hasura's GraphQL 
 ```graphql
 query {
   indexer_health {
+    status              # ok | starting | stale | node_behind
+    seconds_since_poll
+    mongo_head_block
+    mongo_head_time
+    last_error
+    last_error_at
     latest_block_height
     last_update
     tracked_contracts
@@ -64,20 +70,19 @@ query {
 }
 ```
 
-Response:
-```json
-{
-  "data": {
-    "indexer_health": [
-      {
-        "latest_block_height": 892341,
-        "last_update": "2025-01-24T12:34:56",
-        "tracked_contracts": 4,
-        "total_logs": 15234
-      }
-    ]
-  }
-}
+`latest_block_height` and `last_update` come from the newest indexed log, so they only move when a tracked contract emits something — a quiet chain and a broken indexer look the same there. Use `status` for monitoring instead. It is driven by a heartbeat the poll loop writes after every cycle:
+
+| status | meaning |
+|---|---|
+| `ok` | the last poll succeeded within 10 minutes and MongoDB's newest Hive block is less than 10 minutes old |
+| `starting` | no poll has completed yet |
+| `stale` | no successful poll for 10 minutes (e.g. MongoDB unreachable); `last_error` says why |
+| `node_behind` | polls succeed, but the node stopped syncing (MongoDB's newest Hive block is over 10 minutes old) |
+
+`scripts/check_health.sh <graphql-url> [label]` exits non-zero unless the status is `ok`, and posts to `ALERT_WEBHOOK_URL` (Discord or Slack) when set. Run it from cron:
+
+```bash
+*/5 * * * * ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/... /path/to/scripts/check_health.sh https://indexer.example.com/v1/graphql mainnet
 ```
 
 For basic container health, use Hasura's built-in endpoint: `curl http://localhost:8081/healthz`
