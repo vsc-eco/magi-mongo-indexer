@@ -142,6 +142,15 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				continue
 			}
 
+			// Read MongoDB's newest Hive block first: it doubles as a cheap
+			// connectivity check and feeds the indexer_health view.
+			var pollErr error
+			headBlock, headTime, err := getMongoHead(ctx, hiveBlocksCol)
+			if err != nil {
+				pollErr = fmt.Errorf("reading MongoDB head block: %w", err)
+				log.Printf("[mongo] %v", pollErr)
+			}
+
 			// Phase 1: Discovery scan — find new contracts emitting discover events
 			for _, contract := range mappings.Contracts {
 				if contract.DiscoverEvent == "" || contract.Address != "" {
@@ -149,6 +158,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				}
 				if err := scanForDiscovery(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, contract, lastDiscoveryScan); err != nil {
 					log.Printf("[mongo] discovery scan error for event %s: %v", contract.DiscoverEvent, err)
+					pollErr = fmt.Errorf("discovery scan for %s: %w", contract.DiscoverEvent, err)
 				}
 			}
 
@@ -159,6 +169,7 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 				}
 				if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, contract, lastProcessed); err != nil {
 					log.Printf("[mongo] error processing contract %s: %v", contract.Address, err)
+					pollErr = fmt.Errorf("processing contract %s: %w", contract.Address, err)
 				}
 			}
 
@@ -177,8 +188,15 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 					}
 					if err := processContract(ctx, db, contractStateCol, blockHeadersCol, txPoolCol, hiveBlocksCol, virtualContract, lastProcessed); err != nil {
 						log.Printf("[mongo] error processing discovered contract %s: %v", addr, err)
+						pollErr = fmt.Errorf("processing discovered contract %s: %w", addr, err)
 					}
 				}
+			}
+
+			if pollErr != nil {
+				datalayer.RecordPollError(db, pollErr)
+			} else {
+				datalayer.RecordPoll(db, headBlock, headTime)
 			}
 		}
 	}
@@ -211,6 +229,19 @@ func getHiveBlockTimestamp(ctx context.Context, hiveBlocksCol *mongo.Collection,
 		return "", fmt.Errorf("hive block document has no block data for height %d", blockHeight)
 	}
 	return doc.Block.Timestamp, nil
+}
+
+// getMongoHead returns the newest Hive block MongoDB holds (number and timestamp).
+func getMongoHead(ctx context.Context, hiveBlocksCol *mongo.Collection) (uint64, string, error) {
+	var doc HiveBlockDocument
+	opts := options.FindOne().SetSort(bson.D{{Key: "block.block_number", Value: -1}})
+	if err := hiveBlocksCol.FindOne(ctx, bson.M{}, opts).Decode(&doc); err != nil {
+		return 0, "", err
+	}
+	if doc.Block == nil {
+		return 0, "", fmt.Errorf("newest hive block document has no block data")
+	}
+	return doc.Block.BlockNumber, doc.Block.Timestamp, nil
 }
 
 // txPoolID extracts the transaction ID used for transaction_pool lookups.
