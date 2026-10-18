@@ -1,0 +1,374 @@
+# ================================
+# Database Views for Okinoko Subs Indexer
+# ================================
+# These views reconstruct the full contract state from events.
+# They enable all use-cases: offer listings, subscription status,
+# provider dashboards, billing state, and activity feeds.
+# ================================
+
+views:
+
+  # =========================================
+  # Current Offer State
+  # =========================================
+  # Reconstructs the latest state of each offer by combining
+  # created, description, closed, and reopened events.
+  - name: oki_subs_offer_current
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_offer_current AS
+      WITH latest_desc AS (
+        SELECT DISTINCT ON (id)
+          id, description
+        FROM oki_subs_offer_description_events
+        ORDER BY id, indexer_block_height DESC
+      ),
+      state_changes AS (
+        SELECT id, 'active' AS state, indexer_block_height FROM oki_subs_offer_created_events
+        UNION ALL
+        SELECT id, state, indexer_block_height FROM oki_subs_offer_closed_events
+        UNION ALL
+        SELECT id, state, indexer_block_height FROM oki_subs_offer_reopened_events
+      ),
+      latest_state AS (
+        SELECT DISTINCT ON (id)
+          id, state
+        FROM state_changes
+        ORDER BY id, indexer_block_height DESC
+      ),
+      sub_counts AS (
+        SELECT
+          id,
+          COUNT(DISTINCT subscriber) AS total_subscribers,
+          COUNT(DISTINCT subscriber) FILTER (
+            WHERE subscriber NOT IN (
+              SELECT subscriber FROM oki_subs_canceled_events c2 WHERE c2.id = s.id
+              UNION
+              SELECT subscriber FROM oki_subs_inactive_events i2 WHERE i2.id = s.id
+              UNION
+              SELECT subscriber FROM oki_subs_admin_disabled_events d2 WHERE d2.id = s.id
+            )
+          ) AS active_subscribers
+        FROM oki_subs_started_events s
+        GROUP BY id
+      ),
+      onetime_counts AS (
+        SELECT id, COUNT(*) AS total_purchases, SUM(amount) AS total_revenue
+        FROM oki_subs_onetime_paid_events
+        GROUP BY id
+      )
+      SELECT
+        c.id,
+        c.provider,
+        c.name,
+        c.type,
+        c.asset,
+        c.one_time,
+        c.intervals,
+        c.created_at,
+        COALESCE(d.description, '') AS description,
+        COALESCE(ls.state, 'active') AS state,
+        COALESCE(sc.total_subscribers, 0) AS total_subscribers,
+        COALESCE(sc.active_subscribers, 0) AS active_subscribers,
+        COALESCE(oc.total_purchases, 0) AS onetime_purchases,
+        COALESCE(oc.total_revenue, 0) AS onetime_revenue,
+        c.indexer_block_height AS created_block,
+        c.indexer_ts AS created_timestamp
+      FROM oki_subs_offer_created_events c
+      LEFT JOIN latest_desc d ON c.id = d.id
+      LEFT JOIN latest_state ls ON c.id = ls.id
+      LEFT JOIN sub_counts sc ON c.id = sc.id
+      LEFT JOIN onetime_counts oc ON c.id = oc.id;
+
+
+  # =========================================
+  # Current Subscription State
+  # =========================================
+  # Reconstructs the latest state of each subscription (per subscriber per offer).
+  # Combines started, topped-up, collected, canceled, inactive, reactivated,
+  # admin-disabled, and admin-refunded events.
+  - name: oki_subs_subscription_current
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_subscription_current AS
+      WITH all_balance_events AS (
+        -- Every event that changes a subscriber's balance or status
+        SELECT id, subscriber, balance, next, 'started' AS event, interval, indexer_block_height
+        FROM oki_subs_started_events
+        UNION ALL
+        SELECT id, subscriber, balance, next, 'toppedup', interval, indexer_block_height
+        FROM oki_subs_toppedup_events
+        UNION ALL
+        SELECT id, subscriber, balance, next, 'reactivated', interval, indexer_block_height
+        FROM oki_subs_reactivated_events
+        UNION ALL
+        SELECT id, subscriber, balance, next, 'collected', NULL, indexer_block_height
+        FROM oki_subs_collected_events
+        UNION ALL
+        SELECT id, subscriber, 0 AS balance, 0 AS next, 'canceled', NULL, indexer_block_height
+        FROM oki_subs_canceled_events
+        UNION ALL
+        SELECT id, subscriber, balance, 0 AS next, 'inactive', NULL, indexer_block_height
+        FROM oki_subs_inactive_events
+        UNION ALL
+        SELECT id, subscriber, balance, 0 AS next, 'admin_disabled', NULL, indexer_block_height
+        FROM oki_subs_admin_disabled_events
+        UNION ALL
+        SELECT id, subscriber, 0 AS balance, 0 AS next, 'admin_refunded', NULL, indexer_block_height
+        FROM oki_subs_admin_refunded_events
+      ),
+      latest_event AS (
+        SELECT DISTINCT ON (id, subscriber)
+          id, subscriber, balance, next, event, interval, indexer_block_height
+        FROM all_balance_events
+        ORDER BY id, subscriber, indexer_block_height DESC
+      ),
+      first_sub AS (
+        SELECT DISTINCT ON (id, subscriber)
+          id, subscriber, interval AS original_interval, asset, index
+        FROM oki_subs_started_events
+        ORDER BY id, subscriber, indexer_block_height ASC
+      )
+      SELECT
+        le.id AS offer_id,
+        le.subscriber,
+        fs.index AS subscriber_index,
+        COALESCE(le.interval, fs.original_interval) AS interval,
+        le.balance,
+        le.next AS next_billing_at,
+        fs.asset,
+        CASE
+          WHEN le.event IN ('started', 'toppedup', 'reactivated', 'collected') THEN 'active'
+          ELSE 'inactive'
+        END AS status,
+        le.event AS last_event,
+        le.indexer_block_height AS last_event_block
+      FROM latest_event le
+      JOIN first_sub fs ON le.id = fs.id AND le.subscriber = fs.subscriber;
+
+
+  # =========================================
+  # Active Subscriptions
+  # =========================================
+  # Only currently active subscriptions
+  - name: oki_subs_active_subscriptions
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_active_subscriptions AS
+      SELECT
+        s.*,
+        o.provider,
+        o.name AS offer_name,
+        o.type AS offer_type
+      FROM oki_subs_subscription_current s
+      JOIN oki_subs_offer_current o ON s.offer_id = o.id
+      WHERE s.status = 'active';
+
+
+  # =========================================
+  # Subscriptions Due for Collection
+  # =========================================
+  # Active subscriptions where next_billing_at <= now
+  - name: oki_subs_due_for_collection
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_due_for_collection AS
+      SELECT *
+      FROM oki_subs_active_subscriptions
+      WHERE next_billing_at <= EXTRACT(EPOCH FROM NOW())
+      ORDER BY offer_id, next_billing_at ASC;
+
+
+  # =========================================
+  # Subscriber History
+  # =========================================
+  # Full event timeline for each subscriber on each offer
+  - name: oki_subs_subscriber_history
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_subscriber_history AS
+      SELECT id AS offer_id, subscriber, 'started' AS event, paid AS amount, balance, next, interval, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_started_events
+      UNION ALL
+      SELECT id, subscriber, 'toppedup', paid, balance, next, interval, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_toppedup_events
+      UNION ALL
+      SELECT id, subscriber, 'reactivated', paid, balance, next, interval, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_reactivated_events
+      UNION ALL
+      SELECT id, subscriber, 'collected', amount, balance, next, NULL, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_collected_events
+      UNION ALL
+      SELECT id, subscriber, 'canceled', refund, 0, 0, NULL, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_canceled_events
+      UNION ALL
+      SELECT id, subscriber, 'inactive', 0, balance, 0, NULL, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_inactive_events
+      UNION ALL
+      SELECT id, subscriber, 'admin_disabled', 0, balance, 0, NULL, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_admin_disabled_events
+      UNION ALL
+      SELECT id, subscriber, 'admin_refunded', refund, 0, 0, NULL, asset, indexer_block_height, indexer_ts, indexer_tx_hash
+      FROM oki_subs_admin_refunded_events
+      ORDER BY offer_id, subscriber, indexer_block_height;
+
+
+  # =========================================
+  # Provider Dashboard
+  # =========================================
+  # Aggregated stats per provider across all their offers
+  - name: oki_subs_provider_dashboard
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_provider_dashboard AS
+      WITH collection_revenue AS (
+        SELECT
+          o.provider,
+          SUM(c.amount) AS subscription_revenue
+        FROM oki_subs_collected_events c
+        JOIN oki_subs_offer_created_events o ON c.id = o.id
+        GROUP BY o.provider
+      ),
+      onetime_revenue AS (
+        SELECT provider, SUM(amount) AS onetime_revenue
+        FROM oki_subs_onetime_paid_events
+        GROUP BY provider
+      )
+      SELECT
+        o.provider,
+        COUNT(*) AS total_offers,
+        COUNT(*) FILTER (WHERE o.state = 'active') AS active_offers,
+        SUM(o.total_subscribers) AS total_subscribers,
+        SUM(o.active_subscribers) AS active_subscribers,
+        COALESCE(cr.subscription_revenue, 0) AS subscription_revenue,
+        COALESCE(otr.onetime_revenue, 0) AS onetime_revenue,
+        COALESCE(cr.subscription_revenue, 0) + COALESCE(otr.onetime_revenue, 0) AS total_revenue
+      FROM oki_subs_offer_current o
+      LEFT JOIN collection_revenue cr ON o.provider = cr.provider
+      LEFT JOIN onetime_revenue otr ON o.provider = otr.provider
+      GROUP BY o.provider, cr.subscription_revenue, otr.onetime_revenue;
+
+
+  # =========================================
+  # User Subscriptions
+  # =========================================
+  # All subscriptions for a given user across all offers
+  - name: oki_subs_user_subscriptions
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_user_subscriptions AS
+      SELECT
+        s.subscriber,
+        s.offer_id,
+        o.name AS offer_name,
+        o.provider,
+        o.type AS offer_type,
+        s.interval,
+        s.balance,
+        s.next_billing_at,
+        s.asset,
+        s.status,
+        s.last_event,
+        s.last_event_block
+      FROM oki_subs_subscription_current s
+      JOIN oki_subs_offer_current o ON s.offer_id = o.id
+      ORDER BY s.subscriber, s.status DESC, s.last_event_block DESC;
+
+
+  # =========================================
+  # One-Time Purchase History
+  # =========================================
+  # All one-time purchases with offer details
+  - name: oki_subs_onetime_purchases
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_onetime_purchases AS
+      SELECT
+        p.id AS offer_id,
+        o.name AS offer_name,
+        p.buyer,
+        p.provider,
+        p.amount,
+        p.asset,
+        p.indexer_block_height,
+        p.indexer_ts,
+        p.indexer_tx_hash
+      FROM oki_subs_onetime_paid_events p
+      JOIN oki_subs_offer_created_events o ON p.id = o.id
+      ORDER BY p.indexer_block_height DESC;
+
+
+  # =========================================
+  # Collection History
+  # =========================================
+  # All collection summaries with offer details
+  - name: oki_subs_collection_history
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_collection_history AS
+      SELECT
+        cs.id AS offer_id,
+        o.name AS offer_name,
+        o.provider,
+        cs.collected,
+        cs.processed,
+        cs.deactivated,
+        cs.indexer_block_height,
+        cs.indexer_ts,
+        cs.indexer_tx_hash
+      FROM oki_subs_collection_summary_events cs
+      JOIN oki_subs_offer_created_events o ON cs.id = o.id
+      ORDER BY cs.indexer_block_height DESC;
+
+
+  # =========================================
+  # All Events Stream
+  # =========================================
+  # Unified chronological stream of all subscription events
+  - name: oki_subs_all_events
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_all_events AS
+      SELECT 'offer_created' AS event_type, id, provider AS actor, name AS detail, NULL::numeric AS amount, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_offer_created_events
+      UNION ALL
+      SELECT 'offer_closed', id, NULL, state, NULL, NULL, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_offer_closed_events
+      UNION ALL
+      SELECT 'offer_reopened', id, NULL, state, NULL, NULL, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_offer_reopened_events
+      UNION ALL
+      SELECT 'onetime_paid', id, buyer, provider, amount, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_onetime_paid_events
+      UNION ALL
+      SELECT 'subscribed', id, subscriber, interval, paid, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_started_events
+      UNION ALL
+      SELECT 'toppedup', id, subscriber, interval, paid, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_toppedup_events
+      UNION ALL
+      SELECT 'reactivated', id, subscriber, interval, paid, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_reactivated_events
+      UNION ALL
+      SELECT 'canceled', id, subscriber, NULL, refund, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_canceled_events
+      UNION ALL
+      SELECT 'collected', id, subscriber, NULL, amount, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_collected_events
+      UNION ALL
+      SELECT 'inactive', id, subscriber, NULL, balance, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_inactive_events
+      UNION ALL
+      SELECT 'admin_disabled', id, subscriber, provider, balance, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_admin_disabled_events
+      UNION ALL
+      SELECT 'admin_refunded', id, subscriber, provider, refund, asset, indexer_block_height, indexer_ts, indexer_tx_hash FROM oki_subs_admin_refunded_events
+      ORDER BY indexer_block_height DESC;
+
+
+  # =========================================
+  # Recent Activity
+  # =========================================
+  # Latest 100 events for activity feed
+  - name: oki_subs_recent_activity
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_recent_activity AS
+      SELECT * FROM oki_subs_all_events
+      LIMIT 100;
+
+
+  # =========================================
+  # Global Stats
+  # =========================================
+  # Platform-wide subscription statistics
+  - name: oki_subs_global_stats
+    sql: |
+      CREATE OR REPLACE VIEW oki_subs_global_stats AS
+      SELECT
+        (SELECT COUNT(*) FROM oki_subs_offer_created_events) AS total_offers,
+        (SELECT COUNT(*) FROM oki_subs_offer_current WHERE state = 'active') AS active_offers,
+        (SELECT COUNT(*) FROM oki_subs_subscription_current) AS total_subscriptions,
+        (SELECT COUNT(*) FROM oki_subs_subscription_current WHERE status = 'active') AS active_subscriptions,
+        (SELECT COUNT(DISTINCT subscriber) FROM oki_subs_subscription_current) AS unique_subscribers,
+        (SELECT COUNT(DISTINCT provider) FROM oki_subs_offer_created_events) AS unique_providers,
+        (SELECT COALESCE(SUM(amount), 0) FROM oki_subs_collected_events) AS total_subscription_revenue,
+        (SELECT COALESCE(SUM(amount), 0) FROM oki_subs_onetime_paid_events) AS total_onetime_revenue;

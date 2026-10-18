@@ -1,0 +1,83 @@
+# ===============================
+# okinoko-staking — magi-mongo-indexer mappings
+# ===============================
+# Maps the vault's emitted log lines into Postgres so a frontend reads staking
+# state from Hasura instead of calling the contract. Drop into the indexer's
+# internal/config/events/ (hot-reloaded); pair with oki_staking_views.yaml.
+#
+# Events:
+#   okistake_init|owner|assetType|stakeContract|tokenId|cooldownHours|rewardToken|lockTiers
+#   okistake_balance|account|staked|weight|multiplierBps|lockEnd|pending|requested
+#   okistake_reward|kind|account|amount|rewardPerWeight
+#
+# okistake_init is the discoverEvent, so any deployed+initialised vault is
+# auto-registered. Set fromBlockHeight just below the first deploy on the target
+# network (testnet ~5070000, mainnet ~108000000).
+
+contracts:
+  - discoverEvent: "okistake_init"
+    fromBlockHeight: 108000000
+    events:
+      # One row per vault — the registry.
+      - log_type: "okistake_init"
+        table: "okinoko_staking_initialized_events"
+        schema:
+          owner: string
+          asset_type: string
+          stake_contract: string
+          token_id: string
+          cooldown_hours: numeric
+          reward_token: string
+          lock_tiers: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          owner: "1"
+          asset_type: "2"
+          stake_contract: "3"
+          token_id: "4"
+          cooldown_hours: "5"
+          reward_token: "6"
+          lock_tiers: "7"
+      # An account's full current position, on every change. `staked` is the raw
+      # amount, `weight` = staked×multiplier/10000 (voting power), `lock_end` is
+      # the unix second the lock frees (0 = none), `requested` the unix second an
+      # unstake was armed (0 = none).
+      - log_type: "okistake_balance"
+        table: "okinoko_staking_balance_events"
+        schema:
+          account: string
+          staked: numeric
+          weight: numeric
+          multiplier_bps: numeric
+          lock_end: numeric
+          pending: numeric
+          requested: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          account: "1"
+          staked: "2"
+          weight: "3"
+          multiplier_bps: "4"
+          lock_end: "5"
+          pending: "6"
+          requested: "7"
+      # Reward deposits and claims (history).
+      - log_type: "okistake_reward"
+        table: "okinoko_staking_reward_events"
+        schema:
+          kind: string
+          account: string
+          amount: numeric
+          reward_per_weight: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: ":"
+        fields:
+          kind: "1"
+          account: "2"
+          amount: "3"
+          reward_per_weight: "4"

@@ -1,18 +1,15 @@
 # ================================
-# Database Views
+# Database Views for Okinoko DAO Indexer  (contract-aware / multi-DAO)
 # ================================
-# Each entry defines a Postgres view to be created or updated.
-# Fields:
-#   - name: SQL view name (≤ 63 chars).
-#   - sql:  Full CREATE OR REPLACE VIEW statement.
+# Every view carries indexer_contract_id and partitions/joins by it so that
+# multiple deployed DAO contracts (auto-discovered via shindao_init) never merge
+# rows that happen to share a project_id/proposal_id (each contract numbers its
+# projects from 0).
 #
-# Best practice:
-#   - Prefix view names with contract slug to avoid collisions.
-#   - Reference the event tables created in mappings.yaml.
-
-# ================================
-# Database Views for Okinoko DAO Indexer
-# ================================
+# Backward compatibility: contract-id JOINs use IS NOT DISTINCT FROM (null-safe),
+# so pre-discovery rows (indexer_contract_id = NULL, e.g. mainnet "okinoko dao
+# #4") still join to themselves exactly as before — single-contract results are
+# unchanged, which keeps okinoko-terminal working.
 
 views:
 
@@ -61,7 +58,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_project_created_events
 
       UNION ALL
@@ -108,7 +106,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_member_joined_events
 
       UNION ALL
@@ -155,7 +154,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_member_left_events
 
       UNION ALL
@@ -196,13 +196,14 @@ views:
         NULL::text AS membership_payload,
         NULL::boolean AS proposals_members_only,
         NULL::text AS proposal_name,
-        NULL::text As proposal_description,
+        NULL::text AS proposal_description,
         NULL::text AS proposal_metadata,
         NULL::text AS proposal_url,
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_funds_added_events
 
       UNION ALL
@@ -249,7 +250,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_funds_removed_events
 
       UNION ALL
@@ -296,7 +298,8 @@ views:
         options AS proposal_options,
         payouts AS proposal_payouts,
         outcome_meta AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_proposal_created_events
 
       UNION ALL
@@ -343,7 +346,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_proposal_state_events
 
       UNION ALL
@@ -390,7 +394,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_proposal_ready_events
 
       UNION ALL
@@ -437,7 +442,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_proposal_result_events
 
       UNION ALL
@@ -484,7 +490,8 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_proposal_meta_events
 
       UNION ALL
@@ -531,27 +538,29 @@ views:
         NULL::text AS proposal_options,
         NULL::text AS proposal_payouts,
         NULL::text AS proposal_outcome_meta,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_vote_events;
 
   - name: okinoko_dao_membership_latest
     sql: |
       CREATE OR REPLACE VIEW okinoko_dao_membership_latest AS
       WITH membership_events AS (
-        SELECT project_id, member, true AS joined, indexer_block_height
+        SELECT indexer_contract_id, project_id, member, true AS joined, indexer_block_height
         FROM okinoko_dao_member_joined_events
         UNION ALL
-        SELECT project_id, member, false AS joined, indexer_block_height
+        SELECT indexer_contract_id, project_id, member, false AS joined, indexer_block_height
         FROM okinoko_dao_member_left_events
       ),
       ranked AS (
         SELECT
+          indexer_contract_id,
           project_id,
           member,
           joined,
           indexer_block_height,
           ROW_NUMBER() OVER (
-            PARTITION BY project_id, member
+            PARTITION BY indexer_contract_id, project_id, member
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM membership_events
@@ -561,7 +570,8 @@ views:
         member,
         joined AS active,
         CASE WHEN joined THEN 'joined' ELSE 'left' END AS last_action,
-        indexer_block_height AS last_event_block
+        indexer_block_height AS last_event_block,
+        indexer_contract_id
       FROM ranked
       WHERE rn = 1;
 
@@ -575,7 +585,8 @@ views:
         amount,
         asset,
         to_stake AS stake_related,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_funds_added_events
 
       UNION ALL
@@ -587,7 +598,8 @@ views:
         amount,
         asset,
         from_stake AS stake_related,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_funds_removed_events;
 
   - name: okinoko_dao_stake_balances
@@ -595,6 +607,7 @@ views:
       CREATE OR REPLACE VIEW okinoko_dao_stake_balances AS
       WITH stake_movements AS (
         SELECT
+          indexer_contract_id,
           project_id,
           added_by AS account,
           asset,
@@ -604,6 +617,7 @@ views:
         FROM okinoko_dao_funds_added_events
         UNION ALL
         SELECT
+          indexer_contract_id,
           project_id,
           to_address AS account,
           asset,
@@ -616,21 +630,23 @@ views:
         project_id,
         account,
         asset,
-        SUM(amount) AS stake_amount
+        SUM(amount) AS stake_amount,
+        indexer_contract_id
       FROM stake_movements
       WHERE stake_related = true
-      GROUP BY project_id, account, asset;
+      GROUP BY indexer_contract_id, project_id, account, asset;
 
   - name: okinoko_dao_proposal_latest_state
     sql: |
       CREATE OR REPLACE VIEW okinoko_dao_proposal_latest_state AS
       WITH ranked AS (
         SELECT
+          indexer_contract_id,
           proposal_id,
           state,
           indexer_block_height,
           ROW_NUMBER() OVER (
-            PARTITION BY proposal_id
+            PARTITION BY indexer_contract_id, proposal_id
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_state_events
@@ -638,7 +654,8 @@ views:
       SELECT
         proposal_id,
         state,
-        indexer_block_height AS state_block
+        indexer_block_height AS state_block,
+        indexer_contract_id
       FROM ranked
       WHERE rn = 1;
 
@@ -647,6 +664,7 @@ views:
       CREATE OR REPLACE VIEW okinoko_dao_proposal_summary AS
       WITH creation AS (
         SELECT
+          indexer_contract_id,
           proposal_id,
           project_id,
           created_by,
@@ -664,12 +682,13 @@ views:
       ),
       proposal_meta_ranked AS (
         SELECT
+          indexer_contract_id,
           project_id,
           proposal_id,
           field,
           new_value,
           ROW_NUMBER() OVER (
-            PARTITION BY proposal_id, field
+            PARTITION BY indexer_contract_id, proposal_id, field
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_meta_events
@@ -678,6 +697,7 @@ views:
       ),
       proposal_meta AS (
         SELECT
+          indexer_contract_id,
           proposal_id,
           project_id,
           MAX(CASE WHEN field = 'name' AND rn = 1 THEN new_value END) AS name,
@@ -689,21 +709,23 @@ views:
           MAX(CASE WHEN field = 'durationHours' AND rn = 1 THEN new_value END) AS duration_hours,
           MAX(CASE WHEN field = 'url' AND rn = 1 THEN new_value END) AS url
         FROM proposal_meta_ranked
-        GROUP BY proposal_id, project_id
+        GROUP BY indexer_contract_id, proposal_id, project_id
       ),
       state_ranked AS (
         SELECT
+          indexer_contract_id,
           proposal_id,
           state,
           indexer_block_height,
           ROW_NUMBER() OVER (
-            PARTITION BY proposal_id
+            PARTITION BY indexer_contract_id, proposal_id
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_state_events
       ),
       state AS (
         SELECT
+          indexer_contract_id,
           proposal_id,
           state,
           indexer_block_height AS state_block
@@ -712,18 +734,20 @@ views:
       ),
       ready_ranked AS (
         SELECT
+          indexer_contract_id,
           project_id,
           proposal_id,
           ready_at,
           indexer_block_height,
           ROW_NUMBER() OVER (
-            PARTITION BY proposal_id
+            PARTITION BY indexer_contract_id, proposal_id
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_ready_events
       ),
       ready AS (
         SELECT
+          indexer_contract_id,
           project_id,
           proposal_id,
           ready_at,
@@ -733,18 +757,20 @@ views:
       ),
       result_ranked AS (
         SELECT
+          indexer_contract_id,
           project_id,
           proposal_id,
           result,
           indexer_block_height,
           ROW_NUMBER() OVER (
-            PARTITION BY proposal_id
+            PARTITION BY indexer_contract_id, proposal_id
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_result_events
       ),
       result AS (
         SELECT
+          indexer_contract_id,
           project_id,
           proposal_id,
           result,
@@ -770,13 +796,22 @@ views:
         ready.ready_at,
         ready.ready_block,
         result.result,
-        result.result_block, 
-        COALESCE(pm.url, c.url) AS url
+        result.result_block,
+        COALESCE(pm.url, c.url) AS url,
+        c.indexer_contract_id
       FROM creation c
-      LEFT JOIN state ON c.proposal_id = state.proposal_id
-      LEFT JOIN ready ON c.proposal_id = ready.proposal_id
-      LEFT JOIN result ON c.proposal_id = result.proposal_id
-      LEFT JOIN proposal_meta pm ON c.proposal_id = pm.proposal_id;
+      LEFT JOIN state
+        ON c.proposal_id = state.proposal_id
+       AND c.indexer_contract_id IS NOT DISTINCT FROM state.indexer_contract_id
+      LEFT JOIN ready
+        ON c.proposal_id = ready.proposal_id
+       AND c.indexer_contract_id IS NOT DISTINCT FROM ready.indexer_contract_id
+      LEFT JOIN result
+        ON c.proposal_id = result.proposal_id
+       AND c.indexer_contract_id IS NOT DISTINCT FROM result.indexer_contract_id
+      LEFT JOIN proposal_meta pm
+        ON c.proposal_id = pm.proposal_id
+       AND c.indexer_contract_id IS NOT DISTINCT FROM pm.indexer_contract_id;
 
   - name: okinoko_dao_votes_view
     sql: |
@@ -786,7 +821,8 @@ views:
         voter,
         choices,
         weight,
-        indexer_block_height
+        indexer_block_height,
+        indexer_contract_id
       FROM okinoko_dao_vote_events;
 
   - name: okinoko_dao_project_overview
@@ -794,11 +830,12 @@ views:
       CREATE OR REPLACE VIEW okinoko_dao_project_overview AS
       WITH project_meta_ranked AS (
         SELECT
+          indexer_contract_id,
           project_id,
           field,
           new_value,
           ROW_NUMBER() OVER (
-            PARTITION BY project_id, field
+            PARTITION BY indexer_contract_id, project_id, field
             ORDER BY indexer_block_height DESC
           ) AS rn
         FROM okinoko_dao_proposal_meta_events
@@ -807,6 +844,7 @@ views:
       ),
       project_meta AS (
         SELECT
+          indexer_contract_id,
           project_id,
           MAX(CASE WHEN field = 'name' AND rn = 1 THEN new_value END) AS name,
           MAX(CASE WHEN field = 'description' AND rn = 1 THEN new_value END) AS description,
@@ -827,7 +865,7 @@ views:
           MAX(CASE WHEN field = 'membershipPayload' AND rn = 1 THEN new_value END) AS membership_payload,
           MAX(CASE WHEN field = 'proposalsMembersOnly' AND rn = 1 THEN new_value END) AS proposals_members_only
         FROM project_meta_ranked
-        GROUP BY project_id
+        GROUP BY indexer_contract_id, project_id
       )
       SELECT
         pc.project_id,
@@ -861,17 +899,22 @@ views:
         COALESCE(pm.membership_contract, pc.membership_contract) AS membership_contract,
         COALESCE(pm.membership_function, pc.membership_function) AS membership_function,
         COALESCE(pm.membership_nft, pc.membership_nft) AS membership_nft,
-        COALESCE(pm.membership_payload, pc.membership_payload) AS membership_payload
+        COALESCE(pm.membership_payload, pc.membership_payload) AS membership_payload,
+        pc.indexer_contract_id
       FROM okinoko_dao_project_created_events pc
-      LEFT JOIN project_meta pm ON pc.project_id = pm.project_id
+      LEFT JOIN project_meta pm
+        ON pc.project_id = pm.project_id
+       AND pc.indexer_contract_id IS NOT DISTINCT FROM pm.indexer_contract_id
       LEFT JOIN okinoko_dao_membership_latest ml
         ON pc.project_id = ml.project_id
+       AND pc.indexer_contract_id IS NOT DISTINCT FROM ml.indexer_contract_id
       LEFT JOIN LATERAL (
         SELECT
           ARRAY(
             SELECT ml.member
             FROM okinoko_dao_membership_latest ml
             WHERE ml.project_id = pc.project_id
+              AND ml.indexer_contract_id IS NOT DISTINCT FROM pc.indexer_contract_id
               AND ml.active = true
             ORDER BY ml.member
           ) AS active_members,
@@ -879,6 +922,7 @@ views:
             SELECT ml.member
             FROM okinoko_dao_membership_latest ml
             WHERE ml.project_id = pc.project_id
+              AND ml.indexer_contract_id IS NOT DISTINCT FROM pc.indexer_contract_id
             ORDER BY ml.member
           ) AS members
       ) AS member_lists ON TRUE;
@@ -910,16 +954,19 @@ views:
         ml.last_event_block,
         member_lists.active_members,
         member_lists.members,
-        ps.url
+        ps.url,
+        ps.indexer_contract_id
       FROM okinoko_dao_proposal_summary ps
       LEFT JOIN okinoko_dao_membership_latest ml
         ON ps.project_id = ml.project_id
+       AND ps.indexer_contract_id IS NOT DISTINCT FROM ml.indexer_contract_id
       LEFT JOIN LATERAL (
         SELECT
           ARRAY(
             SELECT ml.member
             FROM okinoko_dao_membership_latest ml
             WHERE ml.project_id = ps.project_id
+              AND ml.indexer_contract_id IS NOT DISTINCT FROM ps.indexer_contract_id
               AND ml.active = true
             ORDER BY ml.member
           ) AS active_members,
@@ -927,6 +974,7 @@ views:
             SELECT ml.member
             FROM okinoko_dao_membership_latest ml
             WHERE ml.project_id = ps.project_id
+              AND ml.indexer_contract_id IS NOT DISTINCT FROM ps.indexer_contract_id
             ORDER BY ml.member
           ) AS members
       ) AS member_lists ON TRUE;
@@ -942,10 +990,12 @@ views:
         pc.name,
         pc.indexer_block_height,
         ml.member AS member,
-        pc.indexer_tx_hash
+        pc.indexer_tx_hash,
+        pc.indexer_contract_id
       FROM okinoko_dao_proposal_created_events pc
       LEFT JOIN okinoko_dao_membership_latest ml
         ON ml.project_id = pc.project_id
+       AND ml.indexer_contract_id IS NOT DISTINCT FROM pc.indexer_contract_id
        AND ml.active = TRUE;
 
   # Proposal result events expanded with active members (one row per member)
@@ -958,8 +1008,10 @@ views:
         pr.result,
         pr.indexer_block_height,
         ml.member AS member,
-        pr.indexer_tx_hash
+        pr.indexer_tx_hash,
+        pr.indexer_contract_id
       FROM okinoko_dao_proposal_result_events pr
       LEFT JOIN okinoko_dao_membership_latest ml
         ON ml.project_id = pr.project_id
+       AND ml.indexer_contract_id IS NOT DISTINCT FROM pr.indexer_contract_id
        AND ml.active = TRUE;
