@@ -101,3 +101,113 @@ contracts:
           to_addr: "3"
           deducted: "4"
           sent: "5"
+
+      # UTXO migration between key generations, plus schema-version markers
+      # migrate|src=1|dst=2|id=<txid>|swept=372026|fee=1403|more=false
+      # migrate|v=1   /   migrate|v=2|fold_gen0
+      - log_type: "migrate"
+        table: "btc_mapping_migrate_events"
+        schema:
+          src_gen: numeric
+          dst_gen: numeric
+          tx_id: string
+          swept: numeric
+          fee: numeric
+          more: string
+          schema_version: numeric
+          marker: string
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        variants:
+          - field_count: 7
+            fields:
+              src_gen: "1"
+              dst_gen: "2"
+              tx_id: "3"
+              swept: "4"
+              fee: "5"
+              more: "6"
+          - field_count: 2
+            fields:
+              schema_version: "1"
+          - field_count: 3
+            fields:
+              schema_version: "1"
+              marker: "2"
+
+      # Fee reserve movements — feereserve|topup|txid=<txid>|credited=5000|feeSupply=44436
+      - log_type: "feereserve"
+        table: "btc_mapping_fee_reserve_events"
+        schema:
+          action: string
+          tx_id: string
+          credited: numeric
+          fee_supply: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          action: "1"
+          tx_id: "2"
+          credited: "3"
+          fee_supply: "4"
+
+      # dust-skip|addr=<btc addr>|sats=900
+      - log_type: "dust-skip"
+        table: "btc_mapping_dust_skip_events"
+        schema:
+          addr: string
+          sats: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          addr: "1"
+          sats: "2"
+
+      # dust-writeoff|gen=0|sats=636|chargedTo=feeReserve|feeSupply=21950
+      - log_type: "dust-writeoff"
+        table: "btc_mapping_dust_writeoff_events"
+        schema:
+          gen: numeric
+          sats: numeric
+          charged_to: string
+          fee_supply: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          gen: "1"
+          sats: "2"
+          charged_to: "3"
+          fee_supply: "4"
+
+      # sweep-abandon|txid=<txid>|input=16|writtenOff=20365|members=2|feeSupply=22721
+      - log_type: "sweep-abandon"
+        table: "btc_mapping_sweep_abandon_events"
+        schema:
+          tx_id: string
+          input: numeric
+          written_off: numeric
+          members: numeric
+          fee_supply: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          tx_id: "1"
+          input: "2"
+          written_off: "3"
+          members: "4"
+          fee_supply: "5"
+
+      # Key generation folded into the active one — fold|gen0
+      - log_type: "fold"
+        table: "btc_mapping_fold_events"
+        schema:
+          generation: string
+        parse: "csv"
+        delimiter: "|"
+        fields:
+          generation: "1"
