@@ -76,6 +76,21 @@ contracts:
           operator: "$.attributes.operator"
           approved: "$.attributes.approved"
 
+      # Per-token allowance (owner lets spender move `amount` of token `id`)
+      - log_type: "Approval"
+        table: "magi_nft_token_approval_events"
+        schema:
+          owner: string
+          spender: string
+          token_id: string
+          amount: numeric
+        parse: "json"
+        fields:
+          owner: "$.attributes.owner"
+          spender: "$.attributes.spender"
+          token_id: "$.attributes.id"
+          amount: "$.attributes.amount"
+
       # URI Change
       - log_type: "URI"
         table: "magi_nft_uri_events"
