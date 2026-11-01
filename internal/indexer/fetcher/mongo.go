@@ -21,12 +21,12 @@ import (
 
 // MongoContractState represents the document structure in the contract_state collection
 type MongoContractState struct {
-	ID          interface{}   `bson:"_id"`
-	DocID       string        `bson:"id"`
-	BlockHeight uint64        `bson:"block_height"`
-	ContractID  string        `bson:"contract_id"`
-	Inputs      []string      `bson:"inputs"`
-	Results     []Result      `bson:"results"`
+	ID          interface{} `bson:"_id"`
+	DocID       string      `bson:"id"`
+	BlockHeight uint64      `bson:"block_height"`
+	ContractID  string      `bson:"contract_id"`
+	Inputs      []string    `bson:"inputs"`
+	Results     []Result    `bson:"results"`
 }
 
 // Result represents the execution result with logs
@@ -59,6 +59,17 @@ type HiveBlock struct {
 	BlockNumber uint64 `bson:"block_number"`
 	Timestamp   string `bson:"timestamp"`
 }
+
+// Timeouts bound every MongoDB operation so a transient stall on any single
+// query cannot wedge the single-threaded poll loop forever. Previously all ops
+// used context.Background() with no deadline, so one hung FindOne / cursor
+// silently froze the whole indexer (mainnet, 2026-11-01: stuck at block
+// 111284394 for ~80 min until a manual restart, which stalled alterawallet.com).
+// On timeout the op errors, the error is logged, and the loop retries next tick.
+const (
+	mongoCursorTimeout = 3 * time.Minute  // a full Find + cursor iteration for one contract / discovery scan
+	mongoLookupTimeout = 20 * time.Second // a single FindOne lookup (tx_pool, hive_blocks, block_headers)
+)
 
 // HandleMongo manages a connection to MongoDB and polls the contract_state collection
 // for new entries, inserting them into Postgres.
@@ -204,6 +215,9 @@ func HandleMongo(db *sql.DB, mongoURI string, dbName string, pollInterval time.D
 
 // getBlockTimestamp fetches the timestamp for a given block height from block_headers
 func getBlockTimestamp(ctx context.Context, blockHeadersCol *mongo.Collection, blockHeight uint64) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, mongoLookupTimeout)
+	defer cancel()
+
 	filter := bson.M{
 		"start_block": bson.M{"$lte": blockHeight},
 		"end_block":   bson.M{"$gte": blockHeight},
@@ -220,6 +234,9 @@ func getBlockTimestamp(ctx context.Context, blockHeadersCol *mongo.Collection, b
 
 // getHiveBlockTimestamp fetches the timestamp for a given block height from hive_blocks
 func getHiveBlockTimestamp(ctx context.Context, hiveBlocksCol *mongo.Collection, blockHeight uint64) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, mongoLookupTimeout)
+	defer cancel()
+
 	var doc HiveBlockDocument
 	err := hiveBlocksCol.FindOne(ctx, bson.M{"block.block_number": blockHeight}).Decode(&doc)
 	if err != nil {
@@ -233,6 +250,9 @@ func getHiveBlockTimestamp(ctx context.Context, hiveBlocksCol *mongo.Collection,
 
 // getMongoHead returns the newest Hive block MongoDB holds (number and timestamp).
 func getMongoHead(ctx context.Context, hiveBlocksCol *mongo.Collection) (uint64, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, mongoLookupTimeout)
+	defer cancel()
+
 	var doc HiveBlockDocument
 	opts := options.FindOne().SetSort(bson.D{{Key: "block.block_number", Value: -1}})
 	if err := hiveBlocksCol.FindOne(ctx, bson.M{}, opts).Decode(&doc); err != nil {
@@ -264,6 +284,11 @@ func processContract(
 	contract types.ContractMapping,
 	lastProcessed map[string]uint64,
 ) error {
+	// Bound the whole Find + cursor iteration so a mongo stall can't wedge the
+	// poll loop. On deadline the cursor errors and we retry this contract next tick.
+	ctx, cancel := context.WithTimeout(ctx, mongoCursorTimeout)
+	defer cancel()
+
 	// Build query filter - use contract_id and look for documents with logs
 	filter := bson.M{
 		"contract_id":  contract.Address,
@@ -306,7 +331,9 @@ func processContract(
 
 				// Look up the inclusion height from transaction_pool
 				var txRecord TransactionPoolRecord
-				err := txPoolCol.FindOne(ctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
+				lctx, lcancel := context.WithTimeout(ctx, mongoLookupTimeout)
+				err := txPoolCol.FindOne(lctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
+				lcancel()
 				if err != nil {
 					log.Printf("[mongo] failed to look up tx %s in transaction_pool: %v, falling back to doc block height", txHash, err)
 					blockHeight = doc.BlockHeight
@@ -392,6 +419,11 @@ func scanForDiscovery(
 	template types.ContractMapping,
 	lastScan map[string]uint64,
 ) error {
+	// Bound the whole Find + cursor iteration so a mongo stall can't wedge the
+	// poll loop. On deadline the cursor errors and we retry the scan next tick.
+	ctx, cancel := context.WithTimeout(ctx, mongoCursorTimeout)
+	defer cancel()
+
 	// Query all contract_state docs with logs, above our last scan height
 	filter := bson.M{
 		"block_height": bson.M{"$gt": lastScan[template.DiscoverEvent]},
@@ -455,7 +487,9 @@ func scanForDiscovery(
 					if resultIdx < len(doc.Inputs) {
 						txHash = doc.Inputs[resultIdx]
 						var txRecord TransactionPoolRecord
-						err := txPoolCol.FindOne(ctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
+						lctx, lcancel := context.WithTimeout(ctx, mongoLookupTimeout)
+						err := txPoolCol.FindOne(lctx, bson.M{"id": txPoolID(txHash)}).Decode(&txRecord)
+						lcancel()
 						if err != nil {
 							log.Printf("[discovery] failed to look up tx %s in transaction_pool: %v, falling back", txHash, err)
 							blockHeight = doc.BlockHeight

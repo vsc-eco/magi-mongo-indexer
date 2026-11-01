@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -17,6 +18,27 @@ import (
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/hasura"
 	"github.com/tibfox/magi-mongo-indexer/internal/indexer/mapper"
 )
+
+// withPgTimeouts adds a server-side statement_timeout and a connect_timeout to
+// the Postgres DSN so no single query or connect attempt can block the
+// single-threaded indexer loop indefinitely. lib/pq forwards statement_timeout
+// as a connection runtime parameter, so it applies to every pooled connection
+// and every query (db.Exec, datalayer.InsertLog, discovery writes, …) without
+// touching each call site. Mirrors the mongo-side timeouts in the fetcher.
+func withPgTimeouts(dsn string) string {
+	if dsn == "" {
+		return dsn
+	}
+	if strings.Contains(dsn, "://") { // URL form: postgres://user:pass@host/db
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		return dsn + sep + "statement_timeout=30000&connect_timeout=10"
+	}
+	// key=value form: "host=… dbname=…"
+	return dsn + " statement_timeout=30000 connect_timeout=10"
+}
 
 func main() {
 	cfg := config.LoadConfig()
@@ -33,7 +55,7 @@ func main() {
 	mapper.UpdateState(mappings, views)
 
 	// --- Connect to Postgres ---
-	db, err := sql.Open("postgres", cfg.DBURL)
+	db, err := sql.Open("postgres", withPgTimeouts(cfg.DBURL))
 	if err != nil {
 		log.Fatal("❌ db connect failed:", err)
 	}
