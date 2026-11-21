@@ -1,0 +1,39 @@
+# ===============================
+# EVM MAPPING CONTRACT (ETH / USDC bridge) - STATIC MAPPING
+# ===============================
+#
+# Mainnet EVM bridge. On every deposit it credits to a Magi account it logs
+# (account-mapping DEPOSIT-LOG-1, mapping/deposit_log.go):
+#
+#   map|t=<credited Magi account>|f=<0x sender>|a=<amount, smallest units>|as=<eth|usdc>|bn=<L1 block>|ti=<tx index>
+#
+# the BTC bridge's "map|t=|f=|a=" line plus the asset and the Ethereum
+# transaction's place (block + index: the ERC-20 and MagiDeposit paths key a
+# deposit by a receipt hash, not the Ethereum tx hash). Altera lists these
+# rows as the account's ETH/USDC deposits. The amount is the asset's smallest
+# units (wei; USDC has 6 decimals), kept as text: a numeric field is parsed as
+# a float64, which cannot hold a wei amount exactly (0.01 ETH = 1e16 > 2^53).
+# ===============================
+
+contracts:
+  - address: "vsc1BqoXD32CWWx9UBfh18TnN7Es85RBut2Uhr"
+    events:
+      - log_type: "map"
+        table: "evm_mapping_deposit_events"
+        schema:
+          recipient: string
+          sender: string
+          amount: string
+          asset: string
+          l1_block: numeric
+          l1_tx_index: numeric
+        parse: "csv"
+        delimiter: "|"
+        key_delimiter: "="
+        fields:
+          recipient: "1"
+          sender: "2"
+          amount: "3"
+          asset: "4"
+          l1_block: "5"
+          l1_tx_index: "6"
